@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><title>Aeonward Continuum Console - {TITLE}</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+        "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.webgpu.js",
+        "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.tsl.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import * as TSL from 'three/tsl';
+    import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+    import { ao } from 'three/addons/tsl/display/GTAONode.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+    import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+
+    window.THREE = THREE;
+    window.THREE_TSL = TSL;
+    window.THREE_DISPLAY = { bloom, ao };
+    window.THREE_ADDONS = {
+      DRACOLoader,
+      KTX2Loader,
+      GLTFLoader,
+      MeshoptDecoder,
+      SkeletonUtils
+    };
+    window.dispatchEvent(new CustomEvent('threejs-loaded'));
+  </script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
+    body { background: #0e1117; color: #e6edf3; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    header { background: #161b22; border-bottom: 2px solid #30363d; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.2rem; color: #f0883e; display: flex; align-items: center; gap: 8px; }
+    .status-badge { background: #238636; color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+    .container { display: flex; flex: 1; overflow: hidden; }
+    .threed-pane { flex: 1.85; min-width: 250px; background: #080b10; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+    .threed-header { background: #161b22; border-bottom: 1px solid #30363d; padding: 6px 12px; display: flex; justify-content: space-between; align-items: center; }
+    .threed-title { font-size: 0.82rem; font-weight: bold; color: #58a6ff; display: flex; align-items: center; gap: 6px; }
+    .threed-controls { display: flex; gap: 6px; align-items: center; }
+    .threed-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; padding: 3px 8px; font-size: 0.72rem; cursor: pointer; font-weight: 600; }
+    .threed-btn:hover { background: #30363d; color: #fff; }
+    .threed-btn.active { border-color: #58a6ff; color: #58a6ff; background: rgba(31,111,235,0.25); }
+    .threed-fps-badge { background: #0d1117; border: 1px solid #30363d; color: #7ee787; border-radius: 4px; padding: 2px 7px; font-size: 0.70rem; font-family: monospace; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; letter-spacing: 0.5px; user-select: none; }
+    .threed-fps-badge.warning { color: #f2cc60; border-color: #9e6a03; }
+    .threed-fps-badge.critical { color: #f85149; border-color: #b62324; }
+    .threed-res-select { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px; padding: 2px 6px; font-size: 0.72rem; cursor: pointer; font-weight: 600; outline: none; }
+    .threed-res-select:hover, .threed-res-select:focus { background: #30363d; color: #fff; border-color: #58a6ff; }
+    .threed-res-select option { background: #161b22; color: #c9d1d9; }
+    #threeCanvasContainer { flex: 1; width: 100%; height: 100%; position: relative; overflow: hidden; }
+    #threeCanvasContainer canvas { width: 100% !important; height: 100% !important; display: block; outline: none; }
+    .threed-hud-badge { position: absolute; bottom: 8px; left: 8px; background: rgba(13,17,23,0.85); border: 1px solid #30363d; border-radius: 4px; padding: 4px 8px; font-size: 0.7rem; color: #8b949e; pointer-events: none; z-index: 5; }
+
+    /* Advanced Graphics Performance Telemetry HUD (Tip 15, 68, 72, 91, 94, 97, 99) */
+    .perf-hud-overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 300px;
+      background: rgba(13, 17, 23, 0.92);
+      backdrop-filter: blur(8px);
+      border: 1.5px solid #30363d;
+      border-radius: 8px;
+      padding: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
+      z-index: 150;
+      display: none;
+      font-family: monospace, sans-serif;
+      user-select: none;
+      pointer-events: auto;
+    }
+    .perf-hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #30363d;
+      padding-bottom: 6px;
+    }
+    .perf-hud-title {
+      font-size: 0.68rem;
+      font-weight: 800;
+      color: #7ee787;
+      letter-spacing: 0.8px;
+    }
+    .perf-hud-backend {
+      background: #1f6feb;
+      color: #fff;
+      font-size: 0.62rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .perf-hud-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .perf-hud-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 4px;
+      padding: 5px 6px;
+      text-align: center;
+    }
+    .perf-metric-val {
+      font-size: 0.88rem;
+      font-weight: 800;
+      color: #f0f6fc;
+    }
+    .perf-metric-val.highlight {
+      color: #7ee787;
+    }
+    .perf-metric-lbl {
+      font-size: 0.58rem;
+      color: #8b949e;
+      text-transform: uppercase;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .perf-chart-container {
+      background: #090d13;
+      border: 1px solid #21262d;
+      border-radius: 4px;
+      padding: 4px;
+      margin-bottom: 8px;
+      position: relative;
+    }
+    .perf-chart-container canvas {
+      display: block;
+      width: 100% !important;
+      height: 48px !important;
+    }
+    .perf-chart-legend {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      font-size: 0.58rem;
+      margin-top: 2px;
+      color: #8b949e;
+    }
+    .perf-breakdown-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-size: 0.64rem;
+      color: #8b949e;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .perf-breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .perf-breakdown-row .perf-val {
+      color: #c9d1d9;
+      font-weight: 700;
+    }
+    .terminal-pane { flex: 1.0; min-width: 280px; display: flex; flex-direction: column; background: #161b22; }
+    .panel-resizer {
+      width: 7px;
+      cursor: col-resize;
+      background: #21262d;
+      border-left: 1px solid #30363d;
+      border-right: 1px solid #30363d;
+      position: relative;
+      flex-shrink: 0;
+      user-select: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+      z-index: 40;
+    }
+    .panel-resizer:hover, .panel-resizer.resizing {
+      background: #c8a45c;
+      border-color: #f0883e;
+      box-shadow: 0 0 8px rgba(200, 164, 92, 0.6);
+    }
+    .panel-resizer::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 3px;
+      height: 24px;
+      border-left: 1px dotted #8b949e;
+      border-right: 1px dotted #8b949e;
+    }
+    .stats-panel-container { background: #161b22; border-bottom: 2px solid #30363d; display: flex; flex-direction: column; }
+    .char-identity-banner { background: linear-gradient(90deg, #1f2937, #0d1117); border-bottom: 1px solid #30363d; padding: 7px 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .char-identity-name { font-size: 0.95rem; font-weight: bold; color: #f0883e; display: flex; gap: 8px; align-items: center; }
+    .char-identity-sub { font-size: 0.75rem; color: #79c0ff; background: rgba(56,139,253,0.15); border: 1px solid rgba(56,139,253,0.4); padding: 2px 8px; border-radius: 10px; }
+    .char-toggle-select { background: #0d1117; color: #f0883e; border: 1.5px solid #f0883e; border-radius: 6px; padding: 3px 8px; font-size: 0.75rem; font-weight: bold; cursor: pointer; outline: none; }
+    .char-toggle-select:focus { box-shadow: 0 0 0 2px rgba(240,136,62,0.4); }
+    .stats-nav-tabs { display: flex; background: #0d1117; border-bottom: 1px solid #30363d; overflow-x: auto; }
+    .stats-tab-btn { background: transparent; border: none; padding: 8px 12px; color: #8b949e; cursor: pointer; font-size: 0.78rem; font-weight: 600; border-bottom: 2px solid transparent; }
+    .stats-tab-btn.active { color: #f0883e; border-bottom-color: #f0883e; background: rgba(240,136,62,0.12); }
+    .stats-tab-content { display: none; padding: 10px 14px; font-size: 0.8rem; max-height: 135px; overflow-y: auto; }
+    .stats-tab-content.active { display: block; }
+    .stat-row-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 6px; }
+    .stat-pill { background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 5px; text-align: center; }
+    .stat-pill-label { font-size: 0.65rem; color: #8b949e; text-transform: uppercase; }
+    .stat-pill-val { font-size: 0.95rem; font-weight: bold; color: #79c0ff; }
+    .ability-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+    .ability-box { background: #0d1117; border: 1px solid #30363d; border-radius: 4px; padding: 4px; text-align: center; }
+    .log-area { flex: 1; padding: 14px; overflow-y: auto; font-family: monospace; font-size: 0.9rem; line-height: 1.4; white-space: pre-wrap; background: #0d1117; border-bottom: 1px solid #30363d; }
+    .log-entry { margin-bottom: 10px; }
+    .log-dm { color: #d2a8ff; font-weight: bold; } .log-room { color: #58a6ff; font-weight: bold; } .log-combat { color: #ff7b72; font-weight: bold; } .log-item { color: #7ee787; } .log-player { color: #f0883e; font-weight: bold; }
+    .quick-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px 14px; background: #161b22; border-bottom: 1px solid #30363d; }
+    .action-control-container { grid-column: span 2; display: flex; align-items: stretch; background: #21262d; border: 1px solid #30363d; border-radius: 4px; overflow: hidden; }
+    .action-control-container:focus-within { border-color: #58a6ff; }
+    button.action-exec-btn { border: none; border-right: 1px solid #30363d; border-radius: 0; white-space: nowrap; flex-shrink: 0; padding: 6px 10px; }
+    .take-action-container { display: flex; align-items: center; background: #21262d; border: 1px solid #30363d; border-radius: 4px; overflow: hidden; }
+    .take-action-container:focus-within { border-color: #58a6ff; }
+    .take-select { background: transparent; color: #7ee787; border: none; outline: none; padding: 5px 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer; width: 100%; text-overflow: ellipsis; }
+    .take-select option { background: #161b22; color: #c9d1d9; }
+    .take-select option:disabled { color: #8b949e; }
+    button.btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 6px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; font-weight: 600; }
+    button.btn:hover { background: #30363d; color: #fff; }
+    button.btn-accent { background: #1f6feb; color: #fff; border-color: #388bfd; }
+    button.btn-attack { background: #b62324; color: #fff; border-color: #da3633; }
+    .hover-tooltip { position: absolute; display: none; pointer-events: none; z-index: 100; background: rgba(13,17,23,0.95); border: 1.5px solid #58a6ff; border-radius: 6px; padding: 8px 12px; color: #fff; font-size: 0.8rem; transform: translate(-50%, -110%); white-space: nowrap; }
+    .hover-layer-item { padding: 4px 0; border-bottom: 1px dashed #30363d; } .hover-layer-item:last-child { border-bottom: none; }
+    .tooltip-tag { font-size: 0.65rem; padding: 1px 5px; border-radius: 3px; font-weight: bold; text-transform: uppercase; margin-left: 4px; }
+    .tag-character { background: #1f6feb; } .tag-monster { background: #b62324; } .tag-item { background: #238636; } .tag-obstacle { background: #5a626d; } .tag-portal { background: #8957e5; }
+    .input-bar { display: flex; padding: 10px 14px; background: #161b22; gap: 8px; }
+    input#commandInput { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; color: #fff; font-size: 0.95rem; outline: none; }
+    button#submitBtn { background: #238636; color: #fff; border: 1px solid #2ea043; border-radius: 6px; padding: 0 18px; font-weight: bold; cursor: pointer; }
+    .save-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .save-modal { background: #161b22; border: 2px solid #30363d; border-radius: 8px; width: 540px; max-width: 92vw; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .save-slot-card { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+    .victory-modal-overlay { position: fixed; inset: 0; background: rgba(5, 8, 15, 0.88); backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 2000; animation: fadeInModal 0.6s ease; }
+    @keyframes fadeInModal { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+    .victory-modal { background: linear-gradient(145deg, #161b22, #0d1117 75%, #1f1b2e); border: 2.5px solid #d29922; box-shadow: 0 0 35px rgba(210, 153, 34, 0.45), 0 0 70px rgba(88, 166, 255, 0.2); border-radius: 12px; width: 660px; max-width: 94vw; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; text-align: center; }
+    .victory-banner-badge { align-self: center; font-size: 0.85rem; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; background: linear-gradient(90deg, #d29922, #f0883e, #d29922); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .victory-title { font-size: 1.85rem; font-weight: 900; color: #f0f6fc; text-shadow: 0 0 15px rgba(240, 136, 62, 0.7); margin: 0; }
+    .victory-sub { font-size: 0.95rem; color: #8b949e; line-height: 1.5; margin: 0; }
+    .victory-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 8px 0; }
+    .victory-stat-box { background: rgba(22, 27, 34, 0.85); border: 1px solid #30363d; border-radius: 8px; padding: 10px; }
+    .victory-stat-val { font-size: 1.25rem; font-weight: bold; color: #58a6ff; }
+    .victory-stat-lbl { font-size: 0.72rem; color: #8b949e; text-transform: uppercase; margin-top: 2px; }
+    .victory-btn { background: linear-gradient(135deg, #238636, #2ea043); color: #fff; font-size: 1rem; font-weight: bold; padding: 10px 24px; border: 1px solid #3fb950; border-radius: 6px; cursor: pointer; align-self: center; box-shadow: 0 4px 14px rgba(46, 160, 67, 0.4); transition: transform 0.15s ease; }
+    .victory-btn:hover { transform: scale(1.04); background: linear-gradient(135deg, #2ea043, #3fb950); }
+    .death-modal-overlay { position: fixed; inset: 0; background: rgba(10, 0, 0, 0.92); backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; z-index: 2500; animation: fadeInDeath 0.8s ease; }
+    @keyframes fadeInDeath { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+    .death-modal { background: linear-gradient(145deg, #1c0c0e, #0d0607 80%, #290d10); border: 2.5px solid #da3633; box-shadow: 0 0 40px rgba(218, 54, 51, 0.6), inset 0 0 20px rgba(139, 0, 0, 0.5); border-radius: 12px; width: 560px; max-width: 94vw; padding: 26px 28px; display: flex; flex-direction: column; gap: 14px; text-align: center; }
+    .death-banner-badge { align-self: center; font-size: 0.85rem; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; color: #f85149; }
+    .death-title { font-size: 2rem; font-weight: 900; color: #ff7b72; text-shadow: 0 0 16px rgba(248, 81, 73, 0.8); margin: 0; }
+    .death-sub { font-size: 0.95rem; color: #c9d1d9; line-height: 1.5; margin: 0; }
+    .death-btn { background: linear-gradient(135deg, #da3633, #b62324); color: #fff; font-size: 1.05rem; font-weight: bold; padding: 12px 28px; border: 1px solid #f85149; border-radius: 6px; cursor: pointer; align-self: center; box-shadow: 0 4px 16px rgba(218, 54, 51, 0.5); transition: transform 0.15s ease; }
+    .death-btn:hover { transform: scale(1.05); background: linear-gradient(135deg, #f85149, #da3633); }
+  
+    /* =========================================================
+       AEONWARD CONTINUUM — ORNATE GILDED STARFORGE UI THEME
+       ========================================================= */
+    :root {
+      --aeonward-gold: #c8a45c;
+      --aeonward-gold-bright: #ecd698;
+      --aeonward-gold-dark: #6a4f1a;
+      --aeonward-border-outer: #382d1a;
+      --aeonward-border-inner: #5c4a28;
+      --aeonward-bg-dark: #0a0b0e;
+      --aeonward-bg-panel: rgba(14, 16, 22, 0.92);
+      --aeonward-bg-card: rgba(22, 25, 34, 0.85);
+      --aeonward-slot-bg: #101217;
+      --aeonward-red: #9e2323;
+      --aeonward-red-glow: #e03838;
+      --aeonward-blue: #235d9e;
+      --aeonward-blue-glow: #388ae0;
+      --aeonward-green: #238636;
+      --aeonward-green-glow: #3fb950;
+      --aeonward-purple: #702e96;
+      --aeonward-purple-glow: #a44ee0;
+    }
+
+    body {
+      background: radial-gradient(circle at 50% 30%, #151821 0%, #08090d 100%) !important;
+      color: #dfd8c8 !important;
+      font-family: 'Cinzel', 'Trajan Pro', 'Georgia', serif !important;
+    }
+
+    header {
+      background: linear-gradient(180deg, #181b24 0%, #0c0e14 100%) !important;
+      border-bottom: 2px solid var(--aeonward-border-outer) !important;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.8), inset 0 1px 0 rgba(200,164,92,0.3) !important;
+      padding: 8px 18px !important;
+    }
+
+    header h1 {
+      font-size: 1.15rem !important;
+      color: var(--aeonward-gold-bright) !important;
+      letter-spacing: 1.5px !important;
+      text-transform: uppercase !important;
+      text-shadow: 0 0 10px rgba(200,164,92,0.4) !important;
+    }
+
+    .status-badge {
+      border: 1px solid var(--aeonward-border-inner) !important;
+      background: linear-gradient(180deg, #252a38 0%, #141720 100%) !important;
+      color: #dfd8c8 !important;
+      font-family: 'Segoe UI', Tahoma, sans-serif !important;
+      font-size: 0.75rem !important;
+      letter-spacing: 0.5px !important;
+      box-shadow: inset 0 0 4px rgba(0,0,0,0.6) !important;
+    }
+
+    /* Aeonward Left-Side Party Portraits HUD */
+    .aeonward-party-hud {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 50;
+      pointer-events: auto;
+    }
+
+    .aeonward-portrait-card {
+      position: relative;
+      width: 58px;
+      height: 64px;
+      background: linear-gradient(145deg, #1a1e29, #0a0b0e);
+      border: 2px solid var(--aeonward-border-inner);
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.8), inset 0 0 8px rgba(0,0,0,0.9);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.18s ease;
+      user-select: none;
+    }
+
+    .aeonward-portrait-card:hover {
+      border-color: var(--aeonward-gold);
+      transform: scale(1.06) translateX(4px);
+      box-shadow: 0 0 16px rgba(200,164,92,0.45);
+    }
+
+    .aeonward-portrait-card.selected {
+      border-color: var(--aeonward-gold-bright) !important;
+      box-shadow: 0 0 18px rgba(236,214,152,0.6), inset 0 0 10px rgba(200,164,92,0.4) !important;
+    }
+
+    .aeonward-portrait-avatar {
+      font-size: 1.55rem;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.9));
+    }
+
+    .aeonward-portrait-name {
+      font-size: 0.58rem;
+      color: #e6dfcf;
+      font-weight: 600;
+      max-width: 52px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
+
+    .aeonward-portrait-hp-bar {
+      position: absolute;
+      bottom: -4px;
+      left: 3px;
+      right: 3px;
+      height: 5px;
+      background: #111;
+      border: 1px solid var(--aeonward-border-outer);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .aeonward-portrait-hp-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #8b1e1e, #d83434);
+      width: 100%;
+      transition: width 0.3s ease;
+    }
+
+    /* Aeonward Bottom Action Bar & Hotbar */
+    .aeonward-bottom-action-dock {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(180deg, rgba(24, 28, 38, 0.94) 0%, rgba(12, 14, 20, 0.96) 100%);
+      border: 2px solid var(--aeonward-border-inner);
+      border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.9), inset 0 1px 0 rgba(200,164,92,0.35);
+      padding: 8px 14px;
+      z-index: 50;
+      backdrop-filter: blur(8px);
+    }
+
+    .aeonward-resource-cluster {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding-right: 10px;
+      border-right: 1px solid var(--aeonward-border-outer);
+    }
+
+    .aeonward-resource-pip-group {
+      display: flex;
+      gap: 4px;
+    }
+
+    .aeonward-pip {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #161a22;
+      border: 1px solid #30363d;
+    }
+
+    .aeonward-pip.action {
+      background: radial-gradient(circle, #44b700, #236300);
+      border-color: #72e01a;
+      box-shadow: 0 0 6px rgba(114,224,26,0.6);
+    }
+
+    .aeonward-pip.bonus {
+      background: radial-gradient(circle, #e08c1a, #8f4f00);
+      border-color: #f7a83b;
+      box-shadow: 0 0 6px rgba(247,168,59,0.6);
+    }
+
+    .aeonward-pip.spell {
+      background: radial-gradient(circle, #2e96e0, #0a4d87);
+      border-color: #61b8f5;
+      box-shadow: 0 0 6px rgba(97,184,245,0.6);
+    }
+
+    .aeonward-pip-label {
+      font-size: 0.58rem;
+      color: #9da5b4;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .aeonward-hotbar-slots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .aeonward-hotbar-slot {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(145deg, #12151e, #090a0e);
+      border: 1.5px solid var(--aeonward-border-inner);
+      border-radius: 6px;
+      box-shadow: inset 0 2px 6px rgba(0,0,0,0.8);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .aeonward-hotbar-slot:hover {
+      border-color: var(--aeonward-gold-bright);
+      transform: translateY(-3px);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.8), 0 0 12px rgba(200,164,92,0.4);
+    }
+
+    .aeonward-hotbar-slot:active {
+      transform: translateY(0);
+    }
+
+    .aeonward-hotbar-icon {
+      font-size: 1.25rem;
+    }
+
+    .aeonward-hotbar-key {
+      position: absolute;
+      top: 2px;
+      left: 3px;
+      font-size: 0.55rem;
+      color: var(--aeonward-gold);
+      font-weight: bold;
+      font-family: monospace;
+    }
+
+    .aeonward-hotbar-name {
+      position: absolute;
+      bottom: 2px;
+      font-size: 0.52rem;
+      color: #c0b8a5;
+      text-align: center;
+      line-height: 1;
+      max-width: 40px;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    /* Aeonward Turn Order & Combat Cadence Ribbon (Top of 3D Canvas) */
+    .aeonward-initiative-ribbon {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(180deg, rgba(20, 24, 34, 0.92) 0%, rgba(10, 12, 18, 0.94) 100%);
+      border: 1.5px solid var(--aeonward-border-inner);
+      border-radius: 20px;
+      padding: 4px 14px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.8), inset 0 1px 0 rgba(200,164,92,0.3);
+      z-index: 50;
+      backdrop-filter: blur(6px);
+    }
+
+    .aeonward-initiative-token {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 1.5px solid var(--aeonward-border-outer);
+      background: #141722;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.95rem;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.8);
+      position: relative;
+    }
+
+    .aeonward-initiative-token.active-turn {
+      border-color: var(--aeonward-gold-bright) !important;
+      box-shadow: 0 0 12px rgba(236,214,152,0.8) !important;
+      transform: scale(1.18);
+    }
+
+    .aeonward-initiative-token.monster {
+      border-color: var(--aeonward-red);
+    }
+
+    .aeonward-initiative-token.player {
+      border-color: var(--aeonward-blue);
+    }
+
+    /* Open-World Skyrim/Witcher Top Compass Bar */
+    .aeonward-compass-strip-container {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 560px;
+      max-width: 62vw;
+      height: 34px;
+      background: linear-gradient(180deg, rgba(16, 21, 30, 0.88) 0%, rgba(8, 11, 16, 0.94) 100%);
+      border: 1.5px solid var(--aeonward-gold);
+      border-radius: 6px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 12px rgba(200, 164, 92, 0.25);
+      z-index: 55;
+      overflow: hidden;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .aeonward-compass-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .aeonward-compass-reticle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 2px;
+      background: linear-gradient(180deg, transparent 0%, #ffd700 35%, #ffd700 65%, transparent 100%);
+      box-shadow: 0 0 6px #ffd700;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .aeonward-compass-reticle::before {
+      content: '▼';
+      position: absolute;
+      top: -2px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 8px;
+      color: #ffd700;
+      text-shadow: 0 0 4px #000;
+    }
+
+    .aeonward-compass-bearing-label {
+      position: absolute;
+      bottom: 1px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.58rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--aeonward-gold-bright);
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    /* Aeonward Circular Mini-Map (Top-Right) */
+    .aeonward-minimap-container {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #0e121a 0%, #06070a 100%);
+      border: 3px solid var(--aeonward-gold);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.85), inset 0 0 16px rgba(0,0,0,0.9), 0 0 10px rgba(200,164,92,0.3);
+      z-index: 45;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .aeonward-minimap-compass {
+      position: absolute;
+      top: 3px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.65rem;
+      font-weight: bold;
+      color: var(--aeonward-gold-bright);
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+      letter-spacing: 1px;
+      z-index: 3;
+    }
+
+    #aeonwardMinimapCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .aeonward-minimap-room-tag {
+      position: absolute;
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.52rem;
+      color: #dfd8c8;
+      background: rgba(10, 12, 18, 0.85);
+      border: 1px solid var(--aeonward-border-outer);
+      padding: 1px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      z-index: 3;
+    }
+
+    /* Aeonward Inspect Tooltip Panel (Bottom-Right of 3D Canvas) */
+    .aeonward-inspect-panel {
+      position: absolute;
+      bottom: 12px;
+      right: 14px;
+      width: 220px;
+      background: linear-gradient(160deg, rgba(20, 24, 34, 0.94) 0%, rgba(10, 12, 17, 0.96) 100%);
+      border: 1.5px solid var(--aeonward-border-inner);
+      border-radius: 8px;
+      padding: 8px 10px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.85), inset 0 1px 0 rgba(200,164,92,0.3);
+      z-index: 45;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+      display: none;
+    }
+
+    .aeonward-inspect-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--aeonward-border-outer);
+      padding-bottom: 4px;
+      margin-bottom: 5px;
+    }
+
+    .aeonward-inspect-title {
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: var(--aeonward-gold-bright);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .aeonward-inspect-badge {
+      font-size: 0.58rem;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+
+    .aeonward-inspect-body {
+      font-size: 0.68rem;
+      color: #c9d1d9;
+      line-height: 1.35;
+    }
+
+    /* Aeonward Hotbar Category Filter Pills */
+    .aeonward-hotbar-category-row {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .aeonward-cat-pill {
+      font-size: 0.55rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #141822;
+      border: 1px solid var(--aeonward-border-outer);
+      color: #9da5b4;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: all 0.15s ease;
+      pointer-events: auto;
+    }
+
+    .aeonward-cat-pill:hover, .aeonward-cat-pill.active {
+      background: var(--aeonward-gold-dark);
+      border-color: var(--aeonward-gold);
+      color: var(--aeonward-gold-bright);
+    }
+
+    /* Floating Combat Text / Damage Numbers in 3D Viewport */
+    .aeonward-floating-damage {
+      position: absolute;
+      pointer-events: none;
+      font-weight: 900;
+      font-size: 1.15rem;
+      text-shadow: 0 0 6px rgba(0,0,0,0.9), 0 0 12px rgba(255,50,50,0.8);
+      color: #ff4d4d;
+      z-index: 60;
+      transition: all 0.8s cubic-bezier(0.2, 0.9, 0.3, 1);
+      user-select: none;
+    }
+
+    /* Tactical Vector Target Click Ring / Ping */
+    .tactical-move-ping {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border: 2px solid #58a6ff;
+      border-radius: 50%;
+      pointer-events: none;
+      transform: translate(-50%, -50%) scale(0.4);
+      opacity: 1;
+      box-shadow: 0 0 12px #58a6ff;
+      animation: tacticalPingAnim 0.45s ease-out forwards;
+      z-index: 60;
+    }
+
+    @keyframes tacticalPingAnim {
+      0% { transform: translate(-50%, -50%) scale(0.4); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+    }
+
+    .aeonward-floating-damage.crit {
+      font-size: 1.45rem;
+      color: #ffcc00;
+      text-shadow: 0 0 8px rgba(0,0,0,0.9), 0 0 16px rgba(255,200,0,0.9);
+    }
+
+    .aeonward-floating-damage.heal {
+      color: #4ade80;
+      text-shadow: 0 0 6px rgba(0,0,0,0.9), 0 0 12px rgba(74,222,128,0.8);
+    }
+
+    .aeonward-floating-damage.miss {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      text-shadow: 0 0 4px rgba(0,0,0,0.9);
+    }
+
+    /* Right-side Terminal & Chronicle Log Aeonward Styling */
+    .terminal-pane {
+      background: linear-gradient(180deg, #13161e 0%, #0a0b10 100%) !important;
+      border-left: 2px solid var(--aeonward-border-outer) !important;
+    }
+
+    .char-identity-banner {
+      background: linear-gradient(90deg, #1b202c, #0e1118) !important;
+      border-bottom: 1.5px solid var(--aeonward-border-outer) !important;
+    }
+
+    .stats-tab-btn.active {
+      color: var(--aeonward-gold-bright) !important;
+      border-bottom-color: var(--aeonward-gold) !important;
+      background: rgba(200,164,92,0.12) !important;
+    }
+
+    .stat-pill {
+      background: linear-gradient(145deg, #161922, #0d0f14) !important;
+      border: 1px solid var(--aeonward-border-inner) !important;
+      box-shadow: inset 0 0 6px rgba(0,0,0,0.6) !important;
+    }
+
+    .log-area {
+      background: #090a0e !important;
+      border-bottom: 1.5px solid var(--aeonward-border-outer) !important;
+      font-family: 'Consolas', 'Courier New', monospace !important;
+      box-shadow: inset 0 0 15px rgba(0,0,0,0.9) !important;
+    }
+
+    .input-bar {
+      background: #11141c !important;
+      border-top: 1px solid var(--aeonward-border-outer) !important;
+    }
+
+    input#commandInput {
+      background: #08090d !important;
+      border: 1.5px solid var(--aeonward-border-inner) !important;
+      color: #ecd698 !important;
+    }
+
+    input#commandInput:focus {
+      border-color: var(--aeonward-gold) !important;
+      box-shadow: 0 0 8px rgba(200,164,92,0.3) !important;
+    }
+
+    button#submitBtn {
+      background: linear-gradient(180deg, #8a6c32 0%, #523e19 100%) !important;
+      border: 1px solid var(--aeonward-gold) !important;
+      color: #fff !important;
+      text-transform: uppercase !important;
+      letter-spacing: 1px !important;
+    }
+
+    button#submitBtn:hover {
+      background: linear-gradient(180deg, #ad8740 0%, #695020 100%) !important;
+      box-shadow: 0 0 10px rgba(200,164,92,0.4) !important;
+    }
+
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚔️ Aeonward Continuum: <span>{TITLE}</span></h1>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span class="status-badge" id="learningBadge" style="background:#58a6ff; color:#0d1117;" title="Real-Time Dual-Space Sherman-Morrison CC-ELM SLM Online Adaptation">🧠 CC-ELM SLM: 0 Steps</span>
+      <span class="status-badge" id="partyBadge" style="background:#1f6feb;">👥 Party: 1 Online</span>
+      <span class="status-badge" id="gamepadBadge" style="background:#21262d; border:1px solid #30363d; display:none;">🎮 Controller Connected</span>
+      <span style="font-size:0.8rem; color:#8b949e;">🕹️ Move: Arrows/WASD/D-Pad | Space/A: Strike</span>
+      <button class="btn btn-accent" onclick="openWorldMapModal()" title="View Open-World Map & Fast-Travel to Charted Sectors [M]">🗺️ World Map [M]</button>
+      <button class="btn btn-accent" onclick="window.lwOpenPanel && window.lwOpenPanel('hub')" title="Crafting, Stash, Wardrobe, Bounties, Pets, Mounts, Vehicles [I]">✨ Living World [I]</button>
+      <button class="btn btn-accent" onclick="window.lwTogglePhotoMode && window.lwTogglePhotoMode()" title="Free-Cam Photo Mode & Postcards [K]">📸 Photo [K]</button>
+      <button class="btn btn-accent" onclick="window.lwToggleBuildMode && window.lwToggleBuildMode()" title="Modular Camp Building & Blueprints [B]">🏗️ Build [B]</button>
+      <button class="btn btn-accent" onclick="window.lwCopyInviteLink && window.lwCopyInviteLink()" title="Copy 1-Click Co-Op Invite Link With Portable Hero">🔗 Invite</button>
+      <a id="publicUrlLink" class="status-badge" href="#" target="_blank" rel="noopener" style="display:none; background:#238636; color:#fff; text-decoration:none;" title="Open live public internet game URL">🌐 Online Link</a>
+      <button class="btn btn-accent" onclick="openCharacterModal()">🛡️ Choose Operative</button>
+      <button class="btn btn-accent" onclick="openSaveModal()">💾 Saves</button>
+      <span class="status-badge" id="invBadge">Inv: {INVENTORY}</span>
+    </div>
+  </header>
+  <div class="container">
+    <!-- Panel 1: Unified 3D / 2D Top-Down Tactical Environment -->
+    <div class="threed-pane" id="threedPane" style="flex: 1.85;">
+      <div class="threed-header">
+        <div class="threed-title" id="threedTimeBadge">🌤️ 09:00 AM • Morning</div>
+        <div class="threed-controls">
+          <select class="threed-res-select" id="select3DResolution" onchange="set3DResolution(this.value)" title="Viewport Rendering Resolution">
+            <option value="auto" selected>🖥️ Res: Auto (Fill)</option>
+            <option value="640x480">640 × 480 (VGA)</option>
+            <option value="800x600">800 × 600 (SVGA)</option>
+            <option value="1024x768">1024 × 768 (XGA)</option>
+            <option value="1280x720">1280 × 720 (720p HD)</option>
+            <option value="1600x900">1600 × 900 (HD+)</option>
+            <option value="1920x1080">1920 × 1080 (1080p FHD)</option>
+            <option value="2560x1440">2560 × 1440 (1440p QHD)</option>
+            <option value="3840x2160">3840 × 2160 (4K UHD)</option>
+          </select>
+          <span class="threed-fps-badge" id="threedFpsBadge" title="Real-time GPU / Engine Frames Per Second">⚡ -- FPS</span>
+          <button class="threed-btn" id="btnTogglePerfHUD" onclick="togglePerfHUD()" title="Toggle Advanced Graphics Performance HUD (FPS, GPU, Draw Calls, Triangles, Memory, Latency)">📊 Perf HUD</button>
+          <button class="threed-btn active" id="btnToggleRealism" onclick="toggleRealismFX()" title="Toggle Realism Post-Processing (GTAO Contact Darkening, Subtle Light Bleed, Split-Tone Grading & Lens Grain)">✨ FX: ON</button>
+          <button class="threed-btn" id="btnToggleGrid" onclick="toggleGrid()" title="Toggle Tactical Floor Grid">📐 Grid: OFF</button>
+          <button class="threed-btn" id="btnMuteAudio" onclick="toggleAudioMute()" title="Mute/Unmute Audio & Music">🔊 Audio: ON</button>
+          <button class="threed-btn" id="btnCam2d" onclick="set3DCameraMode('2d')">🗺️ 2D Top-Down</button>
+          <button class="threed-btn" id="btnCamIso" onclick="set3DCameraMode('iso')">📐 Isometric</button>
+          <button class="threed-btn active" id="btnCamTp" onclick="set3DCameraMode('tp')">👤 3rd Person</button>
+          <button class="threed-btn" id="btnCamFp" onclick="set3DCameraMode('fp')">👁️ 1st Person</button>
+          <button class="threed-btn" id="btnCamPreview" onclick="set3DCameraMode('preview')" title="Isolate and inspect character model in 360°">🔍 Preview</button>
+        </div>
+      </div>
+      <div id="threeCanvasContainer">
+        <!-- Open-World Skyrim-Style Top Compass Bar -->
+        <div class="aeonward-compass-strip-container" id="aeonwardCompassStripContainer">
+          <canvas class="aeonward-compass-canvas" id="aeonwardCompassCanvas" width="560" height="34"></canvas>
+          <div class="aeonward-compass-reticle"></div>
+          <div class="aeonward-compass-bearing-label" id="aeonwardCompassBearingLabel">090° E</div>
+        </div>
+
+        <!-- Aeonward Left Party Portraits HUD -->
+        <div class="aeonward-party-hud" id="aeonwardPartyHud">
+          <!-- Rendered dynamically by updateAeonwardPartyHUD() -->
+        </div>
+
+        <!-- Aeonward Top Turn Order & Combat Cadence Ribbon -->
+        <div class="aeonward-initiative-ribbon" id="aeonwardInitiativeRibbon" style="display:none;">
+          <span style="font-size:0.62rem; color:var(--aeonward-gold); font-weight:bold; letter-spacing:1px; margin-right:4px;">COMBAT CADENCE</span>
+          <div id="aeonwardInitiativeTokens" style="display:flex; gap:6px; align-items:center;"></div>
+        </div>
+
+        <!-- Advanced Graphics Performance HUD (Tip 15, 68, 72, 91, 94, 97, 99) -->
+        <div class="perf-hud-overlay" id="perfHudOverlay">
+          <div class="perf-hud-header">
+            <span class="perf-hud-title">⚡ GRAPHICS PERFORMANCE & TELEMETRY</span>
+            <span class="perf-hud-backend" id="perfBackendBadge">WebGPU</span>
+          </div>
+          <div class="perf-hud-grid">
+            <div class="perf-hud-card">
+              <div class="perf-metric-val highlight" id="perfMetricFps">--</div>
+              <div class="perf-metric-lbl">FPS (Target: 60+)</div>
+            </div>
+            <div class="perf-hud-card">
+              <div class="perf-metric-val" id="perfMetricCpu">-- ms</div>
+              <div class="perf-metric-lbl">CPU Frame Time</div>
+            </div>
+            <div class="perf-hud-card">
+              <div class="perf-metric-val" id="perfMetricGpu">-- ms</div>
+              <div class="perf-metric-lbl">GPU Render Time</div>
+            </div>
+            <div class="perf-hud-card">
+              <div class="perf-metric-val" id="perfMetricDrawCalls">--</div>
+              <div class="perf-metric-lbl">Draw Calls / Pushes</div>
+            </div>
+            <div class="perf-hud-card">
+              <div class="perf-metric-val" id="perfMetricTriangles">--</div>
+              <div class="perf-metric-lbl">Rendered Triangles</div>
+            </div>
+            <div class="perf-hud-card">
+              <div class="perf-metric-val" id="perfMetricMem">-- MB</div>
+              <div class="perf-metric-lbl">Memory / Geometries</div>
+            </div>
+          </div>
+          <!-- Sparkline History Canvas -->
+          <div class="perf-chart-container">
+            <canvas id="perfChartCanvas" width="280" height="48"></canvas>
+            <div class="perf-chart-legend">
+              <span style="color:#7ee787;">■ FPS</span>
+              <span style="color:#58a6ff;">■ CPU (ms)</span>
+              <span style="color:#f0883e;">■ GPU (ms)</span>
+            </div>
+          </div>
+          <!-- Detailed Profiler Breakdown (Tip 99 & 68) -->
+          <div class="perf-breakdown-list">
+            <div class="perf-breakdown-row">
+              <span>Simulation / Move Step</span>
+              <span class="perf-val" id="perfStepSim">0.0 ms</span>
+            </div>
+            <div class="perf-breakdown-row">
+              <span>Camera & Viewport Sync</span>
+              <span class="perf-val" id="perfStepCam">0.0 ms</span>
+            </div>
+            <div class="perf-breakdown-row">
+              <span>Audio Spatial Listener</span>
+              <span class="perf-val" id="perfStepAudio">0.0 ms</span>
+            </div>
+            <div class="perf-breakdown-row">
+              <span>Combat / Particle FX</span>
+              <span class="perf-val" id="perfStepFx">0.0 ms</span>
+            </div>
+            <div class="perf-breakdown-row">
+              <span>Three.js Raster Pass</span>
+              <span class="perf-val" id="perfStepRender">0.0 ms</span>
+            </div>
+            <div class="perf-breakdown-row" style="border-top:1px solid #30363d; margin-top:2px; padding-top:2px;">
+              <span>Graphics Performance Mode</span>
+              <span class="perf-val" id="perfAdaptiveStatus" style="color:#7ee787;">Stable Fast (1.0x Fixed)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Aeonward Circular Mini-Map (Top-Right) -->
+        <div class="aeonward-minimap-container" id="aeonwardMinimapContainer">
+          <div class="aeonward-minimap-compass">N</div>
+          <canvas id="aeonwardMinimapCanvas" width="140" height="140"></canvas>
+          <div class="aeonward-minimap-room-tag" id="aeonwardMinimapRoomTag">Solhaven</div>
+        </div>
+
+        <!-- Aeonward Inspect Tooltip Panel (Bottom-Right) -->
+        <div class="aeonward-inspect-panel" id="aeonwardInspectPanel">
+          <div class="aeonward-inspect-header">
+            <span class="aeonward-inspect-title" id="aeonwardInspectTitle">Target</span>
+            <span class="aeonward-inspect-badge" id="aeonwardInspectBadge">EXAMINE</span>
+          </div>
+          <div class="aeonward-inspect-body" id="aeonwardInspectBody">Hover or click entities to examine their tactical telemetry and lore.</div>
+        </div>
+
+        <!-- Aeonward Bottom Action Bar & Hotbar -->
+        <div class="aeonward-bottom-action-dock" id="aeonwardBottomActionDock">
+          <div class="aeonward-resource-cluster">
+            <div class="aeonward-resource-pip-group">
+              <div class="aeonward-pip action" id="aeonwardPipAction" title="Primary Strike Ready (Green Pip)"></div>
+              <div class="aeonward-pip bonus" id="aeonwardPipBonus" title="Tactical Maneuver Ready (Orange Pip)"></div>
+              <div class="aeonward-pip spell" id="aeonwardPipSpell" title="Aether Resonance Ready (Blue Pip)"></div>
+            </div>
+            <span class="aeonward-pip-label" id="aeonwardPipLabel">Cadence</span>
+          </div>
+
+          <div style="display:flex; flex-direction:column; align-items:center;">
+            <!-- Category Tabs: All, Combat, Resonance, Items -->
+            <div class="aeonward-hotbar-category-row">
+              <span class="aeonward-cat-pill active" onclick="setAeonwardHotbarCategory('all')">All</span>
+              <span class="aeonward-cat-pill" onclick="setAeonwardHotbarCategory('combat')">Combat</span>
+              <span class="aeonward-cat-pill" onclick="setAeonwardHotbarCategory('spells')">Resonance</span>
+              <span class="aeonward-cat-pill" onclick="setAeonwardHotbarCategory('items')">Items</span>
+            </div>
+
+            <div class="aeonward-hotbar-slots" id="aeonwardHotbarSlots">
+              <div class="aeonward-hotbar-slot" data-cat="combat" onclick="sendCommand('attack')" title="Deterministic Precision Strike (Sweet-Spot Spacing & Flanking) [Space]">
+                <span class="aeonward-hotbar-key">Spc</span>
+                <span class="aeonward-hotbar-icon">⚔️</span>
+                <span class="aeonward-hotbar-name">Strike</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="spells" id="aeonwardHotbarSkillQ" onclick="window.lwAction && lwAction('weapon_skill',{slot:'q'})" title="Weapon Skill I [1]">
+                <span class="aeonward-hotbar-key">1</span>
+                <span class="aeonward-hotbar-icon">✨</span>
+                <span class="aeonward-hotbar-name">Skill I</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="spells" id="aeonwardHotbarSkillE" onclick="window.lwAction && lwAction('weapon_skill',{slot:'e'})" title="Weapon Skill II [2]">
+                <span class="aeonward-hotbar-key">2</span>
+                <span class="aeonward-hotbar-icon">💥</span>
+                <span class="aeonward-hotbar-name">Skill II</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="spells" id="aeonwardHotbarSkillR" onclick="window.lwAction && lwAction('weapon_skill',{slot:'r'})" title="Weapon Skill III [3]">
+                <span class="aeonward-hotbar-key">3</span>
+                <span class="aeonward-hotbar-icon">🌟</span>
+                <span class="aeonward-hotbar-name">Skill III</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="combat" onclick="window.lwAction && lwAction('parry')" title="Timed Parry: Deflect enemy wind-up slam & Stagger for 1.75x damage [Q]">
+                <span class="aeonward-hotbar-key">Q</span>
+                <span class="aeonward-hotbar-icon">🛡️</span>
+                <span class="aeonward-hotbar-name">Parry</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="combat" onclick="window.lwAction && lwAction('dodge')" title="Evasive Roll: Vault out of slam rings with brief invulnerability [R]">
+                <span class="aeonward-hotbar-key">R</span>
+                <span class="aeonward-hotbar-icon">💨</span>
+                <span class="aeonward-hotbar-name">Dodge</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="items" onclick="promptTake()" title="Interact / Salvage Object Within Reach [4]">
+                <span class="aeonward-hotbar-key">4</span>
+                <span class="aeonward-hotbar-icon">🖐️</span>
+                <span class="aeonward-hotbar-name">Salvage</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="spells" onclick="sendCommand('calibrate')" title="Calibrate Stance / Focus Lock (+50 Momentum & +25% Next Strike) [5]">
+                <span class="aeonward-hotbar-key">5</span>
+                <span class="aeonward-hotbar-icon">🔮</span>
+                <span class="aeonward-hotbar-name">Calibrate</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="items" onclick="sendCommand('use potion')" title="Discharge Aether Cell (+Vitality & +25 Momentum) [6]">
+                <span class="aeonward-hotbar-key">6</span>
+                <span class="aeonward-hotbar-icon">🧪</span>
+                <span class="aeonward-hotbar-name">Aether Cell</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="combat" onclick="sendCommand('talk')" title="Converse with Nearby Concordat Citizen / Envoy [T]">
+                <span class="aeonward-hotbar-key">T</span>
+                <span class="aeonward-hotbar-icon">💬</span>
+                <span class="aeonward-hotbar-name">Converse</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="combat" onclick="sendCommand('short rest')" title="Field Calibration: Deterministic Vitality & Momentum Recovery [8]">
+                <span class="aeonward-hotbar-key">8</span>
+                <span class="aeonward-hotbar-icon">🏕️</span>
+                <span class="aeonward-hotbar-name">Field Rest</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="combat" onclick="sendCommand('long rest')" title="Sanctuary Convergence: Full Vitality & Harmonic Reset [9]">
+                <span class="aeonward-hotbar-key">9</span>
+                <span class="aeonward-hotbar-icon">🛌</span>
+                <span class="aeonward-hotbar-name">Sanctuary</span>
+              </div>
+              <div class="aeonward-hotbar-slot" data-cat="combat" onclick="quickSaveGame()" title="Quick Save Chronicle [F5]">
+                <span class="aeonward-hotbar-key">F5</span>
+                <span class="aeonward-hotbar-icon">💾</span>
+                <span class="aeonward-hotbar-name">Save</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="threed-hud-badge" id="threedHudBadge">👤 3rd Person View | Drag to Orbit / Scroll to Zoom</div>
+        <div class="hover-tooltip" id="threeHoverTooltip" style="z-index: 30; box-shadow: 0 4px 16px rgba(0,0,0,0.75);"></div>
+
+        <!-- Pre-generation & Shader Warmup Loading Overlay (Zero runtime delays / hitch-free) -->
+        <div id="scenePreloadOverlay" style="position: absolute; inset: 0; background: radial-gradient(circle at center, #161b22 0%, #080b10 100%); z-index: 25; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; pointer-events: none; transition: opacity 0.5s ease;">
+          <div style="font-size: 1.8rem; animation: spin-slow 4s linear infinite;">⚡</div>
+          <div style="font-size: 0.95rem; font-weight: 700; color: #58a6ff; letter-spacing: 0.5px;" id="preloadStatusText">Compiling Shaders & Generating 3D Scene Geometry...</div>
+          <div style="width: 240px; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; border: 1px solid #30363d;">
+            <div id="preloadProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #1f6feb, #58a6ff); transition: width 0.25s ease;"></div>
+          </div>
+          <div style="font-size: 0.72rem; color: #8b949e; font-family: monospace;" id="preloadSubText">Pre-caching GLTF operative armatures, environmental textures & lighting</div>
+        </div>
+      </div>
+    </div>
+    <!-- Draggable Divider Resizer between Scene and Text Panel -->
+    <div class="panel-resizer" id="panelResizer" title="Drag to resize Scene and Console panels (Double-click to reset)"></div>
+    <!-- Panel 3: Chronicle Console & Operative Telemetry -->
+    <div class="terminal-pane" id="terminalPane">
+      <div class="stats-panel-container">
+        <div class="char-identity-banner">
+          <div class="char-identity-name">
+            <span>🛡️ Telemetry For:</span>
+            <select class="char-toggle-select" id="playerStatsSelect" onchange="onSelectStatsPlayer(this.value)">
+              <option value="">(Loading vanguard...)</option>
+            </select>
+            <span id="statCharName" style="color:#e6edf3; font-weight:normal; font-size:0.85rem;"></span>
+          </div>
+          <div class="char-identity-sub" id="statCharClassBadge">Aegis Vanguard | Concordat Operative</div>
+        </div>
+        <div class="stats-nav-tabs">
+          <button class="stats-tab-btn active" onclick="switchStatsTab('tab-core')">📊 Core & Combat</button>
+          <button class="stats-tab-btn" onclick="switchStatsTab('tab-abilities')">⚡ Aptitudes</button>
+          <button class="stats-tab-btn" onclick="switchStatsTab('tab-rests')">🏕️ Calibration & Tier</button>
+        </div>
+        <div class="stats-tab-content active" id="tab-core">
+          <div class="stat-row-summary">
+            <div class="stat-pill"><div class="stat-pill-label">Vitality</div><div class="stat-pill-val" id="statHp" style="color:#7ee787;">28 / 28</div></div>
+            <div class="stat-pill"><div class="stat-pill-label">Guard Rating</div><div class="stat-pill-val" id="statAc">18 Guard</div></div>
+            <div class="stat-pill"><div class="stat-pill-label">Mastery Tier</div><div class="stat-pill-val" id="statLvl">Tier 3 (900 XP)</div></div>
+            <div class="stat-pill"><div class="stat-pill-label">Momentum</div><div class="stat-pill-val" id="statInsp" style="color:#f0883e;">PRIMED</div></div>
+          </div>
+          <div style="font-size:0.75rem; color:#8b949e;">Speed: 30 ft (1 Grid Square = 64px) | Skill Mastery: Sweet-Spot (1.25x), Flanking (1.25x), Apex Combo (2.0x)</div>
+        </div>
+        <div class="stats-tab-content" id="tab-abilities">
+          <div class="ability-grid" id="statAbilitiesGrid">
+            <div class="ability-box"><b>FORGE</b><div id="statStr">16 (+3)</div></div>
+            <div class="ability-box"><b>FLOW</b><div id="statDex">12 (+1)</div></div>
+            <div class="ability-box"><b>AEGIS</b><div id="statCon">15 (+2)</div></div>
+            <div class="ability-box"><b>AETHER</b><div id="statInt">10 (+0)</div></div>
+            <div class="ability-box"><b>INSIGHT</b><div id="statWis">13 (+1)</div></div>
+            <div class="ability-box"><b>CHORUS</b><div id="statCha">8 (-1)</div></div>
+          </div>
+        </div>
+        <div class="stats-tab-content" id="tab-rests">
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-accent" style="flex:1;" onclick="sendCommand('short rest')">🏕️ Field Calibrate</button>
+            <button class="btn btn-accent" style="flex:1;" onclick="sendCommand('long rest')">🛌 Sanctuary Rest</button>
+            <button class="btn btn-attack" style="flex:1;" onclick="sendCommand('level up')">⭐ Ascend Tier</button>
+            <button class="btn btn-accent" style="flex:1;" onclick="sendCommand('expand continuum')">🌌 Expand Rifts</button>
+          </div>
+        </div>
+      </div>
+      <div class="log-area" id="logArea">
+        <div class="log-entry log-dm">📜 [CHRONICLE LOG]: {INTRO}</div>
+        <div class="log-entry">{ROOM_DESC}</div>
+      </div>
+      <div class="quick-actions">
+        <div class="action-control-container" title="Select any available valid action for the current game state or click Action to run it">
+          <button type="button" id="actionExecBtn" class="btn btn-accent action-exec-btn" onclick="executeSelectedAction()">⚡ Action</button>
+          <select id="actionSelect" class="take-select" onchange="onActionSelectChange(this.value)">
+            <option value="" disabled selected>Valid actions...</option>
+          </select>
+        </div>
+        <button class="btn btn-attack" onclick="sendCommand('attack')">⚔️ Strike (Space)</button>
+        <button class="btn" onclick="sendCommand('talk')">💬 Talk</button>
+        <button class="btn" onclick="sendCommand('look')">👁️ Survey</button>
+        <button class="btn" onclick="sendCommand('inventory')">🎒 Pack</button>
+        <div class="take-action-container" title="Select an item within reach to salvage">
+          <select id="takeSelect" class="take-select" onchange="onTakeSelectChange(this.value)">
+            <option value="" disabled selected>🖐️ Salvage...</option>
+          </select>
+        </div>
+        <button class="btn btn-accent" onclick="quickSaveGame()">💾 Quick Save</button>
+      </div>
+      <form class="input-bar" onsubmit="handleForm(event)">
+        <input type="text" id="commandInput" placeholder="Type command (attack, calibrate, expand continuum, take) or use Arrow Keys..." autocomplete="off">
+        <button type="submit" id="submitBtn">Execute</button>
+      </form>
+    </div>
+  </div>
+  <div class="save-modal-overlay" id="saveModalOverlay" onclick="if(event.target===this)closeSaveModal()">
+    <div class="save-modal">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="color:#58a6ff;">💾 Chronicle Saves (Compressed Vector States)</h3>
+        <button class="btn" onclick="closeSaveModal()">✕</button>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="newSaveInput" placeholder="Enter save slot name..." style="flex:1; background:#0d1117; border:1px solid #30363d; color:#fff; padding:6px 10px; border-radius:4px;">
+        <button class="btn btn-accent" onclick="createSaveFromModal()">💾 Save</button>
+      </div>
+      <div id="savesListContainer" style="max-height:260px; overflow-y:auto;"></div>
+    </div>
+  </div>
+  <div class="save-modal-overlay" id="charModalOverlay" style="z-index: 1200;">
+    <div class="save-modal" style="width: 680px; max-height: 88vh;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="color:#f0883e;">⚔️ Choose Your Vanguard Operative</h3>
+        <button class="btn" id="closeCharModalBtn" onclick="closeCharacterModal()" style="display:none;">✕</button>
+      </div>
+      <div style="font-size:0.82rem; color:#8b949e;">Select one of the deterministic skill-based archetypes below to join the expedition:</div>
+      <div id="charArchetypesContainer" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap:10px; max-height:65vh; overflow-y:auto; padding:4px 2px;"></div>
+    </div>
+  </div>
+  <div class="victory-modal-overlay" id="victoryCelebrationModal" onclick="if(event.target===this)closeVictoryModal()">
+    <div class="victory-modal">
+      <div class="victory-banner-badge">✨ GRAND CONTINUUM ACCOMPLISHMENT ✨</div>
+      <h2 class="victory-title">🏆 STARFORGE RECLAIMED!</h2>
+      <p class="victory-sub" id="victoryMessageText">
+        You have vanquished Vespera the Eclipse Architect, reignited the Heart of the Starforge, and secured Solhaven Sovereign Plaza and the Aeonward Continuum!
+      </p>
+      <div class="victory-stats-grid">
+        <div class="victory-stat-box">
+          <div class="victory-stat-val" id="victoryTurnCount">--</div>
+          <div class="victory-stat-lbl">Turns Completed</div>
+        </div>
+        <div class="victory-stat-box">
+          <div class="victory-stat-val" id="victoryTimeElapsed">--</div>
+          <div class="victory-stat-lbl">Expedition Time</div>
+        </div>
+        <div class="victory-stat-box">
+          <div class="victory-stat-val" style="color:#7ee787;">8 / 8+</div>
+          <div class="victory-stat-lbl">Chapters & Rifts</div>
+        </div>
+      </div>
+      <div style="background: rgba(13, 17, 23, 0.7); border: 1px solid #30363d; border-radius: 8px; padding: 10px; font-size: 0.85rem; color: #c9d1d9;">
+        🛡️ <strong style="color:#f0883e;">Solhaven Hails Its Vanguard:</strong> Golden-cyan solar plasma surges through the meridian conduits once more. Type <code>expand continuum</code> at any time to chart newly fractured Horizon Rifts!
+      </div>
+      <button class="victory-btn" onclick="closeVictoryModal()">🎉 Continue Exploring the Continuum</button>
+    </div>
+  </div>
+  <div class="death-modal-overlay" id="deathModalOverlay">
+    <div class="death-modal">
+      <div class="death-banner-badge">💀 AEGIS DEPLETION 💀</div>
+      <h2 class="death-title">YOUR VITALITY HAS COLLAPSED</h2>
+      <p class="death-sub" id="deathMessageText">
+        Your operative was overwhelmed by hostile forces across the Aeonward Continuum and collapsed on the tactical grid.
+      </p>
+      <div style="background: rgba(30, 10, 12, 0.75); border: 1px solid #da3633; border-radius: 8px; padding: 12px; font-size: 0.88rem; color: #ff7b72;">
+        ⚰️ <strong style="color:#f85149;">Emergency Recall:</strong> Your vanguard companions extract you via Meridian beacon. Reconstruct at the Sanctuary, restore your Vitality, and rejoin the expedition!
+      </div>
+      <button class="death-btn" onclick="respawnHero()">⚔️ Reconstruct at Sanctuary</button>
+    </div>
+  </div>
+  <!-- Open-World Interactive Continuum Map & Fast-Travel Modal -->
+  <div class="save-modal-overlay" id="worldMapModalOverlay" onclick="if(event.target===this)closeWorldMapModal()" style="z-index: 1300;">
+    <div class="save-modal" style="width: 860px; max-width: 96vw; max-height: 90vh; background: linear-gradient(160deg, #0e131d 0%, #080b11 100%); border: 2.5px solid var(--aeonward-gold); box-shadow: 0 0 35px rgba(200, 164, 92, 0.4);">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1.5px solid rgba(200, 164, 92, 0.3); padding-bottom: 8px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:1.3rem;">🗺️</span>
+          <div>
+            <h3 id="worldMapTitle" style="margin:0; font-size:1.05rem; color:var(--aeonward-gold-bright); letter-spacing:1px;">OPEN WORLD ATLAS</h3>
+            <span style="font-size:0.72rem; color:#8b949e;">Seamless Macro-Sectors & Fast-Travel Slipstream Network • Click any charted sector to Fast-Travel</span>
+          </div>
+        </div>
+        <button class="btn" onclick="closeWorldMapModal()">✕</button>
+      </div>
+
+      <div style="display:flex; gap:12px; margin-top:8px; flex:1; min-height:420px; overflow:hidden;">
+        <!-- Sector Region Filter / Fast-Travel Selector List -->
+        <div style="width: 260px; display:flex; flex-direction:column; gap:6px; background:#0d1117; border:1px solid #30363d; border-radius:8px; padding:10px; overflow-y:auto; max-height:480px;" id="worldMapSectorList">
+          <!-- Populated by renderWorldMapSectorList() -->
+        </div>
+
+        <!-- Interactive 2D World Coordinate Map Canvas -->
+        <div style="flex:1; display:flex; flex-direction:column; gap:6px; background:#05070a; border:1.5px solid #21262d; border-radius:8px; padding:8px; position:relative;">
+          <canvas id="aeonwardWorldMapCanvas" width="560" height="420" style="width:100%; height:100%; display:block; border-radius:6px; cursor:crosshair;"></canvas>
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.7rem; color:#8b949e; padding:0 4px;">
+            <span>🧭 Click sector node to instant fast-travel</span>
+            <span id="worldMapHoverInfo" style="color:var(--aeonward-gold-bright); font-weight:600;">Hover over a charted realm</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.__DND_CONFIG__ = {
+      initialObjects: {INITIAL_OBJECTS},
+      roomName: {ROOM_NAME},
+      manifestHash: {MANIFEST_HASH},
+      bootRoomId: {BOOT_ROOM_ID},
+      bootTw: {BOOT_TW}
+    };
+  </script>
+  <script src="/app.js?v={JS_VER}"></script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+{
+  "textures": {
+    "cave_stone": {
+      "path": "web/assets/textures/cave_stone.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    },
+    "cobblestone": {
+      "path": "web/assets/textures/cobblestone.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    },
+    "wood_planks": {
+      "path": "web/assets/textures/wood_planks.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    },
+    "mossy_stone": {
+      "path": "web/assets/textures/mossy_stone.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    },
+    "grass_trail": {
+      "path": "web/assets/textures/grass_trail.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    },
+    "brick_wall": {
+      "path": "web/assets/textures/brick_wall.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    },
+    "metal_iron": {
+      "path": "web/assets/textures/metal_iron.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    },
+    "sand_mud": {
+      "path": "web/assets/textures/sand_mud.jpg",
+      "source": "polyhaven",
+      "width": 2048,
+      "height": 2048
+    }
+  },
+  "objects": {}
+}
