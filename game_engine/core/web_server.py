@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw
 import numpy as np
 from .constants import HTML_TEMPLATE_PATH, APP_JS_PATH
 from .core_models import VisualCompositor, NeuralWorldModel, get_shared_cc_elm_surrogate
+from .action_catalog import get_action_catalog_payload
 
 def _load_default_template() -> str:
     if os.path.exists(HTML_TEMPLATE_PATH):
@@ -727,6 +728,7 @@ class GameWebServer:
                     "manifest_hash": m_hash,
                     "live_rooms": live_rooms,
                     "current_room": cur_r,
+                    "action_catalog": get_action_catalog_payload(),
                     "public_url": getattr(self, "public_url", None),
                 })
                 return
@@ -752,12 +754,12 @@ class GameWebServer:
                 "current_room": getattr(game, "current_room", getattr(game, "start_room", "start")),
                 "public_url": getattr(self, "public_url", None),
                 "cc_elm_client": self.get_client_cc_elm_payload(),
-                "skills": game.get_client_skills_bundle() if hasattr(game, "get_client_skills_bundle") else {},
+                "skills": {**(game.get_client_skills_bundle() if hasattr(game, "get_client_skills_bundle") else {}), "action_catalog": get_action_catalog_payload()},
             })
         elif parsed.path == "/api/cc_elm_client":
             handler._send_json(self.get_client_cc_elm_payload())
         elif parsed.path == "/api/skills":
-            handler._send_json(game.get_client_skills_bundle() if hasattr(game, "get_client_skills_bundle") else {})
+            handler._send_json({**(game.get_client_skills_bundle() if hasattr(game, "get_client_skills_bundle") else {}), "action_catalog": get_action_catalog_payload()})
         elif parsed.path == "/api/archetypes":
             q = urllib.parse.parse_qs(parsed.query)
             pid = q.get("player_id", [""])[0]
@@ -907,6 +909,8 @@ class GameWebServer:
                 msg = game.set_wardrobe(pid, payload.get("silhouette"), payload.get("headgear"), payload.get("palette"), payload.get("custom_dyes"), payload.get("cloak"))
             elif act == "emote":
                 msg = game.perform_emote(payload.get("emote", "wave"), pid)
+            elif act == "char_action":
+                msg = game.perform_character_action(payload.get("action_id") or payload.get("query", "wave"), pid)
             elif act == "gift":
                 msg = game.gift_item(payload.get("item", ""), pid)
             elif act == "craft":

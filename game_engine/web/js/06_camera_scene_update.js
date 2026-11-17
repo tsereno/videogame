@@ -107,8 +107,8 @@
             previewOrbitAzimuth -= dx * 0.008;
             previewOrbitElevation = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, previewOrbitElevation + dy * 0.008));
           } else if (cameraMode === 'tp') {
-            tpYawOffset -= dx * 0.008;
-            tpPitchOffset = Math.max(-0.25, Math.min(0.40, tpPitchOffset + dy * 0.004));
+            tpYawOffset -= dx * 0.0075;
+            tpPitchOffset = Math.max(-0.22, Math.min(0.95, tpPitchOffset + dy * 0.005));
           } else if (cameraMode === 'fp') {
             fpYawOffset -= dx * 0.008;
             fpPitchOffset = Math.max(-0.85, Math.min(0.85, fpPitchOffset - dy * 0.006));
@@ -389,7 +389,11 @@
       ['btnCam2d', 'btnCamIso', 'btnCamTp', 'btnCamFp', 'btnCamPreview'].forEach(id => document.getElementById(id)?.classList.remove('active'));
       const [fx, fz] = (typeof facingToVec === 'function') ? facingToVec(lastFacing) : [1, 0];
       const facingYaw = Math.atan2(fx, fz);
-      if (mode === 'tp') tpYawOffset = facingYaw;
+      if (mode === 'tp') {
+        tpYawOffset = facingYaw;
+        if (Math.abs(tpPitchOffset) < 0.01) tpPitchOffset = 0.22;
+        _tpCamSmooth.initialized = false;
+      }
       else if (mode === 'fp') fpYawOffset = facingYaw;
       const modeMeta = {
         '2d': ['btnCam2d', '🗺️ 2D Top-Down View | Scroll to Zoom'],
@@ -411,6 +415,7 @@
     let lastCamShowGridApplied = null;
     let _lastCamEntityKey = '';
     let _camTerrainX = NaN, _camTerrainZ = NaN, _camTerrainRoom = null, _camTerrainY = 0;
+    const _tpCamSmooth = { initialized: false, yaw: Math.PI / 2, pitch: 0.22, dist: 128, posX: 0, posY: 40, posZ: 0, lookX: 0, lookY: 24, lookZ: 0, lastMs: 0 };
     function update3DCamera() {
       if (!threeCamera) return;
 
@@ -528,18 +533,97 @@
         threeCamera.lookAt(px, 16, pz);
       } else if (cameraMode === 'tp') {
         threeCamera.up.set(0, 1, 0);
-        // Third-person Skyrim-style over-the-shoulder exploration camera (unclamped open-world vista)
-        const curAngle = tpYawOffset;
+        // Smooth third-person over-the-shoulder orbit with terrain clearance raymarching
+        const nowTpMs = performance.now();
+        const tpDt = _tpCamSmooth.lastMs ? Math.min(0.05, Math.max(0.001, (nowTpMs - _tpCamSmooth.lastMs) * 0.001)) : 0.016;
+        _tpCamSmooth.lastMs = nowTpMs;
+        const kRot = 1 - Math.exp(-16 * tpDt);
+        const kPos = 1 - Math.exp(-12 * tpDt);
+
+        const sprintPull = (window.__lwIsSprinting ? 14 : 0) + (window.__mountedSkyDragon ? 46 : 0);
+        const targetDist = tpDistance + sprintPull;
+        if (!_tpCamSmooth.initialized) {
+          _tpCamSmooth.yaw = tpYawOffset;
+          _tpCamSmooth.pitch = tpPitchOffset;
+          _tpCamSmooth.dist = targetDist;
+        } else {
+          let dYaw = tpYawOffset - _tpCamSmooth.yaw;
+          while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+          while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+          _tpCamSmooth.yaw += dYaw * kRot;
+          _tpCamSmooth.pitch += (tpPitchOffset - _tpCamSmooth.pitch) * kRot;
+          _tpCamSmooth.dist += (targetDist - _tpCamSmooth.dist) * kRot;
+        }
+
+        const curAngle = _tpCamSmooth.yaw;
+        const pitchRad = Math.max(-0.22, Math.min(0.95, _tpCamSmooth.pitch));
         const dx = Math.sin(curAngle), dz = Math.cos(curAngle);
         const rx = -Math.cos(curAngle), rz = Math.sin(curAngle);
-        const sprintPull = window.__lwIsSprinting ? 14 : 0;
 
-        const camX = px - dx * (tpDistance + sprintPull) + rx * 10;
-        const camY = py + Math.max(24, 22 + tpDistance * (0.28 + tpPitchOffset));
-        const camZ = pz - dz * (tpDistance + sprintPull) + rz * 10;
+        const dragonLift = window.__mountedSkyDragon ? 14 : 0;
+        const postureY = (typeof window.__lwPostureYOffset === 'number') ? window.__lwPostureYOffset : 0;
+        const focusY = py + 23 + dragonLift + postureY;
+        const horizDist = Math.max(24, _tpCamSmooth.dist * Math.cos(pitchRad * 0.65));
+        const vertOff = _tpCamSmooth.dist * Math.sin(pitchRad) + 8;
 
-        threeCamera.position.set(camX, camY, camZ);
-        threeCamera.lookAt(px + dx * 65 + rx * 6, py + 25, pz + dz * 65 + rz * 6);
+        let desX = px - dx * horizDist + rx * 9;
+        let desZ = pz - dz * horizDist + rz * 9;
+        let desY = focusY + vertOff;
+
+        // Sample terrain elevation along camera spring arm so slopes never clip the near plane
+        const groundFn = (typeof window.getOpenWorldTerrainHeight === 'function') ? window.getOpenWorldTerrainHeight : null;
+        if (groundFn) {
+          let maxArmGround = _camTerrainY;
+          for (let si = 1; si <= 6; si++) {
+            const frac = si / 6;
+            const sx = px + (desX - px) * frac;
+            const sz = pz + (desZ - pz) * frac;
+            const sg = groundFn(sx, sz);
+            if (sg > maxArmGround) maxArmGround = sg;
+            const rayY = focusY + (desY - focusY) * frac;
+            if (rayY < sg + 11.5) desY = Math.max(desY, focusY + ((sg + 11.5 - focusY) / Math.max(0.25, frac)));
+          }
+          const camGroundY = groundFn(desX, desZ);
+          desY = Math.max(desY, camGroundY + 12.5, maxArmGround + 8.0);
+        } else {
+          desY = Math.max(desY, 12.0);
+        }
+
+        const tgtLookX = px + dx * 55 + rx * 5;
+        const tgtLookY = Math.max((groundFn ? groundFn(px, pz) : 0) + 12, focusY - pitchRad * 14);
+        const tgtLookZ = pz + dz * 55 + rz * 5;
+
+        if (!_tpCamSmooth.initialized) {
+          _tpCamSmooth.posX = desX; _tpCamSmooth.posY = desY; _tpCamSmooth.posZ = desZ;
+          _tpCamSmooth.lookX = tgtLookX; _tpCamSmooth.lookY = tgtLookY; _tpCamSmooth.lookZ = tgtLookZ;
+          _tpCamSmooth.initialized = true;
+        } else {
+          _tpCamSmooth.posX += (desX - _tpCamSmooth.posX) * kPos;
+          _tpCamSmooth.posY += (desY - _tpCamSmooth.posY) * Math.min(1, kPos * 1.35);
+          _tpCamSmooth.posZ += (desZ - _tpCamSmooth.posZ) * kPos;
+          _tpCamSmooth.lookX += (tgtLookX - _tpCamSmooth.lookX) * kPos;
+          _tpCamSmooth.lookY += (tgtLookY - _tpCamSmooth.lookY) * kPos;
+          _tpCamSmooth.lookZ += (tgtLookZ - _tpCamSmooth.lookZ) * kPos;
+        }
+        // Final post-damping floor clamp so camera can never dip below terrain during fast downward pulls
+        const finalGroundY = groundFn ? groundFn(_tpCamSmooth.posX, _tpCamSmooth.posZ) : 0;
+        if (_tpCamSmooth.posY < finalGroundY + 12.0) _tpCamSmooth.posY = finalGroundY + 12.0;
+
+        threeCamera.position.set(_tpCamSmooth.posX, _tpCamSmooth.posY, _tpCamSmooth.posZ);
+        threeCamera.lookAt(_tpCamSmooth.lookX, _tpCamSmooth.lookY, _tpCamSmooth.lookZ);
+
+        // Keep entity overhead labels crisp without ballooning when camera is close
+        const camEnts = (typeof threeDynamicEntities !== 'undefined' && Array.isArray(threeDynamicEntities)) ? threeDynamicEntities : [];
+        for (let ei = 0; ei < camEnts.length; ei++) {
+          const ce = camEnts[ei];
+          const ls = ce && ce.userData && ce.userData.labelSprite;
+          if (!ls) continue;
+          const sz = ce.userData.entitySize || 48;
+          const distToCam = threeCamera.position.distanceTo(ce.position);
+          const scaleAdj = Math.max(0.28, Math.min(1.0, (distToCam - 22) / 95));
+          ls.visible = !isPreview && distToCam > 28;
+          ls.scale.set(sz * 1.15 * scaleAdj, sz * 0.31 * scaleAdj, 1);
+        }
       } else if (cameraMode === 'fp') {
         threeCamera.up.set(0, 1, 0);
         // First-person eye height looking forward with interactive look pitch & yaw

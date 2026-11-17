@@ -222,8 +222,8 @@
           // Only animate walking/running when the character is genuinely translating across the floor
           const isMovingNow = (actualDisplacement > 0.30 || c.userData.smoothedSpeed > 0.30);
           if (isMovingNow) {
-            // Running if speed > 6.0, walking otherwise
-            const isRunning = (speed > 6.0 || actualDisplacement > 3.5);
+            // Running if speed > 6.0, active sprint/run posture, or large step
+            const isRunning = (speed > 6.0 || actualDisplacement > 3.5 || (c.userData.isLocalPlayer && (window.__lwIsSprinting || window.__lwLocalPosture === 'run')));
             const animFreq = isRunning ? 0.016 : 0.010;
             const legAmp = isRunning ? 0.72 : 0.48;
             const armAmp = isRunning ? 0.62 : 0.38;
@@ -238,13 +238,14 @@
             if (c.userData.lShin) setLimbPitch(c.userData.lShin, Math.max(0, stride) * legAmp * 0.85);
             if (c.userData.rShin) setLimbPitch(c.userData.rShin, Math.max(0, -stride) * legAmp * 0.85);
 
-            setLimbPitch(c.userData.lArm, -stride * armAmp);
-            if (c.userData.rArm && !c.userData.isSwinging) {
-              setLimbPitch(c.userData.rArm, stride * armAmp);
+            const armActive = c.userData.isSwinging || c.userData.isInteracting;
+            if (!armActive) {
+              setLimbPitch(c.userData.lArm, -stride * armAmp);
+              if (c.userData.rArm) setLimbPitch(c.userData.rArm, stride * armAmp);
+              // Dynamic elbow pump on forward arm swing
+              if (c.userData.lForeArm) setLimbPitch(c.userData.lForeArm, -Math.max(0, stride) * armAmp * 0.45);
+              if (c.userData.rForeArm) setLimbPitch(c.userData.rForeArm, -Math.max(0, -stride) * armAmp * 0.45);
             }
-            // Dynamic elbow pump on forward arm swing
-            if (c.userData.lForeArm) setLimbPitch(c.userData.lForeArm, -Math.max(0, stride) * armAmp * 0.45);
-            if (c.userData.rForeArm && !c.userData.isSwinging) setLimbPitch(c.userData.rForeArm, -Math.max(0, -stride) * armAmp * 0.45);
 
             // Subtle torso counter-twist during stride
             if (c.userData.chestBone && c.userData.chestBone.userData.baseQuat && c.userData.chestBone.userData.yawAxis) {
@@ -319,30 +320,35 @@
               }
             }
           } else {
-            // Idle / Standing pose with subtle breathing & secondary cloak settle
+            // Idle / Standing pose (skipped when Living World action posture controls kinematics)
             const breath = Math.sin(now * 0.0025 + ei * 1.3);
-            charGrp.position.y = 0;
-            charGrp.rotation.x += (0 - (charGrp.rotation.x || 0)) * 0.18;
-            charGrp.rotation.z += (0 - (charGrp.rotation.z || 0)) * 0.18;
-            if (c.userData.cloakMesh) {
-              const idleCloak = 0.14 + breath * 0.025;
-              c.userData.cloakMesh.rotation.x += (idleCloak - c.userData.cloakMesh.rotation.x) * 0.12;
-              c.userData.cloakMesh.rotation.z += (0 - c.userData.cloakMesh.rotation.z) * 0.12;
+            if (!c.userData.isDoingAction) {
+              charGrp.position.y = 0;
+              charGrp.rotation.x += (0 - (charGrp.rotation.x || 0)) * 0.18;
+              charGrp.rotation.z += (0 - (charGrp.rotation.z || 0)) * 0.18;
+              if (c.userData.cloakMesh) {
+                const idleCloak = 0.14 + breath * 0.025;
+                c.userData.cloakMesh.rotation.x += (idleCloak - c.userData.cloakMesh.rotation.x) * 0.12;
+                c.userData.cloakMesh.rotation.z += (0 - c.userData.cloakMesh.rotation.z) * 0.12;
+              }
+              setLimbPitch(c.userData.lLeg, 0);
+              setLimbPitch(c.userData.rLeg, 0);
+              if (c.userData.lShin) setLimbPitch(c.userData.lShin, 0);
+              if (c.userData.rShin) setLimbPitch(c.userData.rShin, 0);
+              const armBusy = c.userData.isSwinging || c.userData.isInteracting;
+              if (!armBusy) {
+                setLimbPitch(c.userData.lArm, breath * 0.03);
+                if (c.userData.lForeArm) setLimbPitch(c.userData.lForeArm, -breath * 0.04);
+                if (c.userData.rArm) {
+                  const isBoneRig = Boolean(c.userData.rArm.userData && c.userData.rArm.userData.baseQuat);
+                  setLimbPitch(c.userData.rArm, isBoneRig ? ((hasHostilesInRoom ? -0.10 : 0) - breath * 0.03) : (hasHostilesInRoom ? -0.35 : 0.05));
+                }
+                if (c.userData.rForeArm) {
+                  setLimbPitch(c.userData.rForeArm, -(hasHostilesInRoom ? 0.12 : 0) + breath * 0.04);
+                }
+              }
             }
-            setLimbPitch(c.userData.lLeg, 0);
-            setLimbPitch(c.userData.rLeg, 0);
-            if (c.userData.lShin) setLimbPitch(c.userData.lShin, 0);
-            if (c.userData.rShin) setLimbPitch(c.userData.rShin, 0);
-            setLimbPitch(c.userData.lArm, breath * 0.03);
-            if (c.userData.lForeArm) setLimbPitch(c.userData.lForeArm, -breath * 0.04);
-            if (c.userData.rArm && !c.userData.isSwinging) {
-              const isBoneRig = Boolean(c.userData.rArm.userData && c.userData.rArm.userData.baseQuat);
-              setLimbPitch(c.userData.rArm, isBoneRig ? ((hasHostilesInRoom ? -0.10 : 0) - breath * 0.03) : (hasHostilesInRoom ? -0.35 : 0.05));
-            }
-            if (c.userData.rForeArm && !c.userData.isSwinging) {
-              setLimbPitch(c.userData.rForeArm, -(hasHostilesInRoom ? 0.12 : 0) + breath * 0.04);
-            }
-            if (c.userData.chestBone && c.userData.chestBone.userData.baseQuat && c.userData.chestBone.userData.pitchAxis) {
+            if (!c.userData.isSwinging && c.userData.chestBone && c.userData.chestBone.userData.baseQuat && c.userData.chestBone.userData.pitchAxis) {
               const cb = c.userData.chestBone;
               if (!cb.userData._pitchQuat) cb.userData._pitchQuat = new THREE.Quaternion();
               cb.userData._pitchQuat.setFromAxisAngle(cb.userData.pitchAxis, breath * 0.025);

@@ -6,6 +6,124 @@
       return (typeof classifyWithClientCCELM === 'function') ? classifyWithClientCCELM(lowName, shapeCrit, 0.32, 'raider') : 'raider';
     }
 
+    const _PROC_HAND_POSES = {
+      none:   { thumb: [0.35, 0.28], fingers: [[0.24, 0.26], [0.30, 0.32], [0.36, 0.38], [0.42, 0.44]] },
+      open:   { thumb: [0.12, 0.10], fingers: [[0.08, 0.10], [0.10, 0.12], [0.14, 0.16], [0.18, 0.20]] },
+      tome:   { thumb: [0.38, 0.28], fingers: [[0.34, 0.42], [0.38, 0.46], [0.42, 0.50], [0.46, 0.54]] },
+      grip:   { thumb: [0.85, 0.72], fingers: [[1.05, 1.18], [1.10, 1.22], [1.12, 1.22], [1.06, 1.14]] },
+    };
+
+    function _poseProcHand(handRec, poseKey) {
+      if (!handRec) return;
+      const spec = _PROC_HAND_POSES[poseKey] || (poseKey === 'none' ? _PROC_HAND_POSES.none : poseKey === 'open' ? _PROC_HAND_POSES.open : poseKey === 'tome' ? _PROC_HAND_POSES.tome : _PROC_HAND_POSES.grip);
+      const xs = handRec.xSign;
+      if (handRec.thumb) {
+        handRec.thumb[0].rotation.z = -xs * (0.48 + spec.thumb[0]);
+        handRec.thumb[0].rotation.y = xs * 0.34;
+        if (handRec.thumb[1]) handRec.thumb[1].rotation.z = -xs * spec.thumb[1];
+      }
+      if (handRec.fingers) {
+        for (let i = 0; i < handRec.fingers.length; i++) {
+          const f = handRec.fingers[i];
+          const a = spec.fingers[Math.min(i, spec.fingers.length - 1)];
+          f[0].rotation.z = -xs * a[0];
+          if (f[1]) f[1].rotation.z = -xs * a[1];
+        }
+      }
+    }
+    window._poseProceduralHand = _poseProcHand;
+
+    function _buildArticulatedArmAndHand(opts) {
+      const { grp, charGrp, isRight, sx, sy, bScale = 1.0, elbowPitch = -0.45, torsoMat, cuffMat, skinMat, heldKind = 'none', itemScale = 1.0, itemPreset = {}, defaultPoseKey } = opts;
+      const xSign = isRight ? 1 : -1;
+      const uLen = 5.4 * bScale, fLen = 5.2 * bScale;
+      const _g = (typeof getSharedGeo === 'function') ? getSharedGeo : (_, fn) => fn();
+      const armGeo = _g(`proc_uarm_${bScale.toFixed(2)}`, () => new THREE.CylinderGeometry(1.45 * bScale, 1.20 * bScale, uLen, 10));
+      const foreGeo = _g(`proc_farm_${bScale.toFixed(2)}`, () => new THREE.CylinderGeometry(1.22 * bScale, 0.96 * bScale, fLen, 10));
+      const cuffGeo = _g(`proc_cuff_${bScale.toFixed(2)}`, () => new THREE.CylinderGeometry(1.38 * bScale, 1.15 * bScale, 2.2 * bScale, 10));
+      const palmGeo = _g(`proc_palm_${bScale.toFixed(2)}`, () => new THREE.BoxGeometry(1.05 * bScale, 1.85 * bScale, 1.95 * bScale));
+
+      const armPivot = new THREE.Group();
+      armPivot.position.set(xSign * sx * bScale, sy * bScale, 0);
+      const uMesh = new THREE.Mesh(armGeo, torsoMat); uMesh.position.y = -uLen * 0.5;
+      armPivot.add(uMesh);
+
+      const foreArmPivot = new THREE.Group();
+      foreArmPivot.position.set(0, -uLen, 0);
+      foreArmPivot.rotation.x = elbowPitch;
+      const fMesh = new THREE.Mesh(foreGeo, torsoMat); fMesh.position.y = -fLen * 0.5;
+      const cMesh = new THREE.Mesh(cuffGeo, cuffMat || torsoMat); cMesh.position.y = -fLen * 0.72;
+      foreArmPivot.add(fMesh); foreArmPivot.add(cMesh);
+
+      const wristPivot = new THREE.Group();
+      wristPivot.position.set(0, -fLen, 0);
+      if (heldKind === 'tome') wristPivot.rotation.y = xSign * -0.95;
+
+      const palmMesh = new THREE.Mesh(palmGeo, skinMat);
+      palmMesh.position.set(0, -0.92 * bScale, 0.10 * bScale);
+      wristPivot.add(palmMesh);
+
+      const thumbChain = [];
+      const tp0 = new THREE.Group(); tp0.position.set(-xSign * 0.28 * bScale, -0.45 * bScale, 0.88 * bScale); tp0.rotation.x = 0.42;
+      const tm0 = new THREE.Mesh(_g(`proc_tp0_${bScale.toFixed(2)}`, () => new THREE.CylinderGeometry(0.24 * bScale, 0.21 * bScale, 0.85 * bScale, 6)), skinMat);
+      tm0.position.y = -0.42 * bScale; tp0.add(tm0);
+      const tp1 = new THREE.Group(); tp1.position.set(0, -0.82 * bScale, 0);
+      const tm1 = new THREE.Mesh(_g(`proc_tp1_${bScale.toFixed(2)}`, () => new THREE.CylinderGeometry(0.20 * bScale, 0.16 * bScale, 0.72 * bScale, 6)), skinMat);
+      tm1.position.y = -0.34 * bScale; tp1.add(tm1);
+      tp0.add(tp1); wristPivot.add(tp0);
+      thumbChain.push(tp0, tp1);
+
+      const fingers = [];
+      const zOffsets = [0.68, 0.24, -0.20, -0.62];
+      const lenMults = [0.95, 1.05, 0.96, 0.78];
+      for (let fi = 0; fi < 4; fi++) {
+        const ls = lenMults[fi] * bScale;
+        const p0 = new THREE.Group(); p0.position.set(0, -1.78 * bScale, zOffsets[fi] * bScale);
+        const m0 = new THREE.Mesh(_g(`proc_fp0_${fi}_${bScale.toFixed(2)}`, () => new THREE.CylinderGeometry(0.22 * bScale, 0.19 * bScale, 0.92 * ls, 6)), skinMat);
+        m0.position.y = -0.44 * ls; p0.add(m0);
+        const p1 = new THREE.Group(); p1.position.set(0, -0.86 * ls, 0);
+        const m1 = new THREE.Mesh(_g(`proc_fp1_${fi}_${bScale.toFixed(2)}`, () => new THREE.CylinderGeometry(0.18 * bScale, 0.14 * bScale, 0.80 * ls, 6)), skinMat);
+        m1.position.y = -0.38 * ls; p1.add(m1);
+        p0.add(p1); wristPivot.add(p0);
+        fingers.push([p0, p1]);
+      }
+
+      const handRec = { xSign, wrist: wristPivot, thumb: thumbChain, fingers };
+      const poseKey = defaultPoseKey || (heldKind && heldKind !== 'none' ? heldKind : 'none');
+      _poseProcHand(handRec, poseKey);
+      if (!grp.userData.procHands) grp.userData.procHands = {};
+      grp.userData.procHands[isRight ? 'right' : 'left'] = handRec;
+
+      const sock = new THREE.Group();
+      sock.position.set(-xSign * 0.68 * bScale, -2.02 * bScale, 0.16 * bScale);
+      if (heldKind && heldKind !== 'none' && typeof _buildSkillWeaponMesh === 'function') {
+        const itemMesh = _buildSkillWeaponMesh(heldKind, itemScale, itemPreset);
+        if (itemMesh) {
+          const hk = String(heldKind).toLowerCase();
+          if (hk === 'staff') { itemMesh.rotation.set(-elbowPitch + 0.18, 0, -xSign * 0.08); }
+          else if (hk === 'bow') { itemMesh.rotation.set(-elbowPitch, 0, -xSign * 0.16); }
+          else if (hk === 'shield') { sock.position.set(-xSign * 0.55 * bScale, -1.65 * bScale, 0.25 * bScale); itemMesh.rotation.set(-elbowPitch, xSign * 1.42, 0); }
+          else if (hk === 'tome') { sock.position.set(-xSign * 0.92 * bScale, -1.78 * bScale, 0.18 * bScale); itemMesh.rotation.set(-Math.PI * 0.38, 0, xSign * 0.15); }
+          else if (hk === 'dagger' || hk === 'daggers') { itemMesh.rotation.set(-elbowPitch + 1.05, 0, 0); }
+          else { itemMesh.rotation.set(-elbowPitch + 0.82, 0, -xSign * 0.08); }
+          sock.add(itemMesh);
+          grp.userData[isRight ? 'rightItemGrp' : 'leftItemGrp'] = itemMesh;
+        }
+      }
+      wristPivot.add(sock);
+      foreArmPivot.add(wristPivot);
+      armPivot.add(foreArmPivot);
+      charGrp.add(armPivot);
+      armPivot.userData.baseQuat = armPivot.quaternion.clone();
+      armPivot.userData.pitchAxis = new THREE.Vector3(1, 0, 0);
+      foreArmPivot.userData.baseQuat = foreArmPivot.quaternion.clone();
+      foreArmPivot.userData.pitchAxis = new THREE.Vector3(1, 0, 0);
+      grp.userData[isRight ? 'rArm' : 'lArm'] = armPivot;
+      grp.userData[isRight ? 'rForeArm' : 'lForeArm'] = foreArmPivot;
+      grp.userData[isRight ? 'rHand' : 'lHand'] = wristPivot;
+      return armPivot;
+    }
+
     function addVolumetricEntity_monster(_E) {
       with (_E) {
           const rigKind = _classifyMonsterRig(lowName);
@@ -87,10 +205,19 @@
             };
             addLimb('lLeg', -3, 11, 3, 11, 3.5, leatherMat, 0, -5.5, 0);
             addLimb('rLeg', 3, 11, 3, 11, 3.5, leatherMat, 0, -5.5, 0);
-            addLimb('lArm', -6.2, 20, 2.5, 10, 2.5, mSkin, 0, -5, 0);
-            grp.userData.weaponMount = addLimb('rArm', 6.2, 20, 2.5, 10, 2.5, mSkin, 0, -5, 1.5, -0.4);
+            _buildArticulatedArmAndHand({
+              grp, charGrp, isRight: false, sx: 6.4, sy: 20, bScale, elbowPitch: isRanged ? -0.62 : -0.35,
+              torsoMat: darkLeatherMat, cuffMat: darkLeatherMat, skinMat: mSkin,
+              heldKind: isRanged ? 'bow' : 'none', itemScale: bScale * 0.92, itemPreset: { key: rigKind }
+            });
+            grp.userData.weaponMount = _buildArticulatedArmAndHand({
+              grp, charGrp, isRight: true, sx: 6.4, sy: 20, bScale, elbowPitch: isRanged ? -0.78 : -0.52,
+              torsoMat: darkLeatherMat, cuffMat: darkLeatherMat, skinMat: mSkin,
+              heldKind: isRanged ? 'none' : (isBrute ? 'hammer' : 'sword'), itemScale: bScale * 0.92, itemPreset: { key: rigKind },
+              defaultPoseKey: isRanged ? 'draw' : undefined
+            });
             if (typeof buildSkillPartMeshes === 'function') {
-              buildSkillPartMeshes(charGrp, [...(hm.body || []), ...(isRanged ? (hm.ranged || []) : (hm.melee || []))], {
+              buildSkillPartMeshes(charGrp, hm.body || [], {
                 unitScale: bScale, shadows: true,
                 mats: { armor: darkLeatherMat, skin: mSkin, iris: eyeIrisMat, pupil: eyePupilMat, fang: fangMat, mouth: mouthMat, wood: woodMat, weapon: isBrute ? woodMat : steelMat }
               });
@@ -220,33 +347,26 @@
             if (grp.userData.lwMaterials) grp.userData.lwMaterials.cloakMat = cloakMat;
           }
 
-          const lArmPivot = new THREE.Group(), rArmPivot = new THREE.Group();
-          lArmPivot.position.set(-7.0, 22, 0); rArmPivot.position.set(7.0, 22, 0);
-          const armUpperGeo = _gg('hum_arm_v2', () => new THREE.CylinderGeometry(1.55, 1.25, 10.6, 10));
-          const cuffGeo = _gg('hum_cuff_v2', () => new THREE.CylinderGeometry(1.48, 1.35, 3.2, 10));
-          lArmPivot.add(_m(armUpperGeo, torsoMat, 0, -5.2, 0));
-          lArmPivot.add(_m(cuffGeo, pauldronMat, 0, -8.5, 0));
-          rArmPivot.add(_m(armUpperGeo, torsoMat, 0, -5.2, 1.5, -0.35));
-          rArmPivot.add(_m(cuffGeo, pauldronMat, 0, -8.2, 2.6, -0.35));
-          lArmPivot.add(_mb(2.3, 2.6, 2.4, skinMat, 0, -10.8, 0));
-          rArmPivot.add(_mb(2.3, 2.6, 2.4, skinMat, 0, -10.2, 3.6));
-          charGrp.add(lArmPivot); charGrp.add(rArmPivot);
-          grp.userData.lArm = lArmPivot; grp.userData.rArm = rArmPivot;
-
-          const weaponGrp = new THREE.Group();
-          weaponGrp.name = 'weaponGroup';
-          if (typeof _buildSkillWeaponMesh === 'function') {
-            const mounts = cliCfg.weapon_mounts || {}, mc = mounts[st.weapon] || mounts.default || { pos: [7, 13.5, 5], rot: [0.7854, 0, 0] };
-            const rMesh = _buildSkillWeaponMesh(st.weapon, 1.0, st);
-            if (rMesh) { rMesh.position.set(...mc.pos); rMesh.rotation.set(...mc.rot); weaponGrp.add(rMesh); }
-            if (mc.offhand) {
-              const lMesh = _buildSkillWeaponMesh(mc.offhand, 1.0, st);
-              if (lMesh) { lMesh.position.set(...mc.off_pos); if (mc.off_rot) lMesh.rotation.set(...mc.off_rot); weaponGrp.add(lMesh); }
-            }
-          }
-          grp.userData.weaponMount = rArmPivot;
-          charGrp.add(weaponGrp);
-          grp.userData.weaponGroup = weaponGrp;
+          const hp = (cliCfg.hero_presets && cliCfg.hero_presets[heroKey]) || {};
+          const mounts = cliCfg.weapon_mounts || {}, mc = mounts[st.weapon] || mounts.default || {};
+          const rKind = hp.right_hand || (st.weapon === 'bow' ? 'none' : st.weapon) || 'sword';
+          const lKind = hp.left_hand || (st.weapon === 'bow' ? 'bow' : (mc.offhand || 'none'));
+          _buildArticulatedArmAndHand({
+            grp, charGrp, isRight: false, sx: 6.9, sy: 22, bScale: 1.0,
+            elbowPitch: lKind === 'tome' ? -0.78 : (lKind === 'bow' ? -0.35 : -0.48),
+            torsoMat, cuffMat: pauldronMat, skinMat,
+            heldKind: lKind, itemScale: 1.0, itemPreset: st
+          });
+          grp.userData.weaponMount = _buildArticulatedArmAndHand({
+            grp, charGrp, isRight: true, sx: 6.9, sy: 22, bScale: 1.0,
+            elbowPitch: rKind === 'none' && lKind === 'bow' ? -0.82 : -0.52,
+            torsoMat, cuffMat: pauldronMat, skinMat,
+            heldKind: rKind, itemScale: 1.0, itemPreset: st,
+            defaultPoseKey: (rKind === 'none' && lKind === 'bow') ? 'draw' : undefined
+          });
+          grp.userData.defaultHandPoses = { left: lKind || 'none', right: rKind !== 'none' ? rKind : (lKind === 'bow' ? 'draw' : 'none') };
+          grp.userData.leftHandKind = lKind;
+          grp.userData.rightHandKind = rKind;
       }
     }
 

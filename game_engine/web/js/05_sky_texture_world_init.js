@@ -206,6 +206,10 @@
           }
 
           if (clickedMountable) {
+            if (clickedMountable.mountCommand === 'sky_dragon' && window.__dragonCtrl && window.__dragonCtrl.mount) {
+              window.__dragonCtrl.mount();
+              return;
+            }
             sendCommand('mount ' + (clickedMountable.mountCommand || 'peddler'));
             return;
           }
@@ -809,8 +813,10 @@
             for (const [rk, rv] of Object.entries(cachedManRec.rooms || {})) {
               mergedRooms[rk] = Object.assign({}, rv, (rawManifest.live_rooms && rawManifest.live_rooms[rk]) || {});
             }
+            const mergedSkills = Object.assign({}, cachedManRec.skills || {}, rawManifest.action_catalog ? { action_catalog: rawManifest.action_catalog } : {});
             manifest = Object.assign({}, cachedManRec, {
               rooms: mergedRooms,
+              skills: mergedSkills,
               current_room: rawManifest.current_room || cachedManRec.current_room,
               public_url: rawManifest.public_url || cachedManRec.public_url,
             });

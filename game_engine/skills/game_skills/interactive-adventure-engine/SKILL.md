@@ -252,15 +252,16 @@ game:
         - {type: box, fixed: [1.1, 4.9, 1.45], pos: [-1.25, 0, 0], mat: gold}
         - {type: octahedron, fixed: [0.65, 0], pos: [0.4, 0, 0.72], scale: [1, 1.2, 0.4], mat: gold}
       bow:
-        - {type: torus, fixed: [6.5, 0.42, 8, 20, 3.6128], rot: [0, 0, -1.8064], mat: grip}
-        - {type: box, fixed: [0.6, 1.8, 0.7], pos: [0, 0, 6.5], mat: gold}
-        - {type: cylinder, fixed: [0.06, 0.06, 12.2, 6], pos: [0, 0, -1.6], color: 14536888}
+        - {type: torus, fixed: [9.5, 0.38, 8, 22, 1.65], pos: [0, 0, -9.5], rot: [0, -1.5708, -0.825], mat: grip}
+        - {type: box, fixed: [0.68, 2.1, 0.92], pos: [0, 0, 0], mat: gold}
+        - {type: cylinder, fixed: [0.06, 0.06, 14.0, 6], pos: [0, 0, -3.05], color: 14536888}
     weapon_mounts:
-      bow: {pos: [-7.5, 16.0, 5.0], rot: [0, 1.5708, -0.31416]}
-      staff: {pos: [7.5, 18.0, 5.0], rot: [0.15, 0, 0]}
-      daggers: {pos: [7.0, 11.0, 3.8], rot: [1.428, 0, 0], offhand: dagger, off_pos: [-7.0, 11.5, 0.0], off_rot: [1.428, 0, 0]}
-      sword: {pos: [7.0, 13.5, 5.0], rot: [0.7854, 0, 0], offhand: shield, off_pos: [-8.5, 17.0, 1.5], off_rot: [0, 0, 0]}
-      default: {pos: [7.0, 13.5, 5.0], rot: [0.7854, 0, 0]}
+      bow: {pos: [0, 0, 0], rot: [0, 0, -0.22]}
+      staff: {pos: [0, 0, 0], rot: [0.18, 0, 0]}
+      daggers: {pos: [0, 0, 0], rot: [1.32, 0, 0], offhand: dagger, off_pos: [0, 0, 0], off_rot: [1.32, 0, 0]}
+      sword: {pos: [0, 0, 0], rot: [0.85, 0, 0], offhand: shield, off_pos: [0, 0, 0], off_rot: [0, -1.35, 0]}
+      hammer: {pos: [0, 0, 0], rot: [0.82, 0, 0], offhand: shield, off_pos: [0, 0, 0], off_rot: [0, -1.35, 0]}
+      default: {pos: [0, 0, 0], rot: [0.85, 0, 0]}
     headgear_recipes:
       helm:
         - {type: lathe, profile: [[3.9, 28.2], [4.1, 30.8], [3.5, 32.8], [1.8, 34.0], [0.1, 34.3]], segments: 14, mat: steel}

@@ -717,14 +717,14 @@
     }
 
     function _buildRockGeo(rx = 12, ry = 10, rz = 12, seed = 1) {
-      const g = new THREE.DodecahedronGeometry(1.0, 1).toNonIndexed();
+      const g = new THREE.IcosahedronGeometry(1.0, 2).toNonIndexed();
       const pa = g.attributes.position;
       for (let i = 0; i < pa.count; i++) {
         let vx = pa.getX(i), vy = pa.getY(i), vz = pa.getZ(i);
-        const ridge = 0.86 + Math.sin(vx * 3.9 + seed) * 0.20 + Math.cos(vz * 4.4 - vy * 2.1) * 0.15;
+        const ridge = 0.92 + Math.sin(vx * 3.1 + seed) * 0.11 + Math.cos(vz * 3.5 - vy * 1.8) * 0.08;
         vx *= ridge; vy *= ridge; vz *= ridge;
         const cut = vx * 0.55 + vy * 0.75 + vz * 0.35;
-        if (cut > 0.62) { const ex = (cut - 0.62) * 0.72; vx -= 0.55 * ex; vy -= 0.75 * ex; vz -= 0.35 * ex; }
+        if (cut > 0.68) { const ex = (cut - 0.68) * 0.55; vx -= 0.55 * ex; vy -= 0.75 * ex; vz -= 0.35 * ex; }
         pa.setXYZ(i, vx * rx, (vy < -0.15 ? vy * 0.55 : vy) * ry, vz * rz);
       }
       g.computeVertexNormals();
@@ -815,17 +815,22 @@
       for (let i = 0; i < 6; i++) {
         const ang = (i / 6) * Math.PI * 2 + (i % 2) * 0.42;
         const bh = h * (0.65 + (i % 3) * 0.18);
-        const bg = new THREE.BoxGeometry(0.28, bh, Math.max(0.8, r * 0.24));
+        const bw = Math.max(0.65, r * 0.22);
+        const bg = new THREE.BoxGeometry(0.18, bh, bw, 1, 4, 1).toNonIndexed();
         const pa = bg.attributes.position, vc = new Float32Array(pa.count * 3);
         for (let vi = 0; vi < pa.count; vi++) {
-          const t = Math.max(0, Math.min(1, (pa.getY(vi) + bh * 0.5) / Math.max(1, bh)));
+          const y0 = pa.getY(vi);
+          const t = Math.max(0, Math.min(1, (y0 + bh * 0.5) / Math.max(1, bh)));
+          const taper = Math.max(0.06, 1.0 - Math.pow(t, 1.15) * 0.94);
+          pa.setXYZ(vi, pa.getX(vi) * taper + t * t * (r * 0.28), y0, pa.getZ(vi) * taper);
           vc[vi * 3] = 0.52 + t * 0.62; vc[vi * 3 + 1] = 0.58 + t * 0.60; vc[vi * 3 + 2] = 0.45 + t * 0.42;
         }
+        bg.computeVertexNormals();
         bg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
         bg.translate(0, bh * 0.42, 0);
-        bg.rotateZ(0.28 + (i % 2) * 0.16);
+        bg.rotateZ(0.20 + (i % 2) * 0.14);
         bg.rotateY(ang);
-        bg.translate(Math.cos(ang) * r * 0.28, -bh * 0.08, Math.sin(ang) * r * 0.28);
+        bg.translate(Math.cos(ang) * r * 0.26, -bh * 0.08, Math.sin(ang) * r * 0.26);
         parts.push(bg);
       }
       return _mergeSculptGeos(parts);
@@ -1252,6 +1257,16 @@
       inv.forEach(item => actions.push({ cmd: `drop ${item}`, label: `📤 Drop ${item}` }));
 
       const _lwState = (window.__LW_STATE__ && window.__LW_STATE__.lastLw) || {};
+      const _drState = (window.__dragonCtrl && window.__dragonCtrl.getState) ? window.__dragonCtrl.getState() : null;
+      if (_drState) {
+        if (_drState.ridden) {
+          actions.push({ cmd: 'dragon_fire', label: '🔥 Breathe Dragon Fire & Smoke' });
+          actions.push({ cmd: 'dismount', label: '🥾 Dismount Sky Dragon' });
+        } else {
+          if (!_drState.landed) actions.push({ cmd: 'summon_dragon', label: '🐉 Call Sky Dragon to Land' });
+          actions.push({ cmd: 'mount_dragon', label: _drState.landed ? '🪽 Mount Landed Sky Dragon' : '🪽 Summon & Mount Sky Dragon' });
+        }
+      }
       if (_lwState.mounts && _lwState.mounts[pid]) {
         actions.push({ cmd: 'dismount', label: '🥾 Dismount Mount' });
       } else if ((_lwState.wildlife || []).some(w => w && w.kind === 'peddler' && !w.ridden_by)) {
@@ -1293,6 +1308,13 @@
         { cmd: '__quick_save__', label: '💾 Quick Save' },
         { cmd: 'help', label: '❓ Help' }
       );
+      const _seenCmds = new Set(actions.map(a => a.cmd));
+      const _catList = (skills && Array.isArray(skills.action_catalog)) ? skills.action_catalog : [];
+      _catList.forEach(a => {
+        if (a && a.id && !_seenCmds.has(a.id)) {
+          actions.push({ cmd: a.id, label: `${a.icon || '✨'} ${a.label}`, group: a.category || 'Character Actions' });
+        }
+      });
       return actions;
     }
 
@@ -1310,10 +1332,21 @@
       hdr.value = ''; hdr.disabled = true; hdr.selected = true;
       hdr.innerText = `⚡ Actions (${actions.length} valid) — ${activeCmd}`;
       sel.appendChild(hdr);
+      const groups = {};
       actions.forEach(a => {
         const opt = document.createElement('option');
         opt.value = a.cmd; opt.innerText = a.label;
-        sel.appendChild(opt);
+        if (a.group) {
+          if (!groups[a.group]) {
+            const og = document.createElement('optgroup');
+            og.label = a.group;
+            groups[a.group] = og;
+            sel.appendChild(og);
+          }
+          groups[a.group].appendChild(opt);
+        } else {
+          sel.appendChild(opt);
+        }
       });
       return actions;
     }

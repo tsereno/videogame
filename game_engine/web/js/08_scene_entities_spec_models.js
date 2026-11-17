@@ -122,20 +122,20 @@
             dirLight.userData.sunOffset = [sp.pos[0], Math.max(360, sp.pos[1]), sp.pos[2]];
             dirLight.position.set(sp.pos[0], sp.pos[1], sp.pos[2]);
           }
-          const groundBounceHex = (_tType === 'glacier') ? 0x5c7692 : ((_tType === 'forest' || _tType === 'glade' || _tType === 'steppe') ? 0x3b4d28 : ((_tType === 'desert' || _tType === 'road') ? 0x624b32 : 0x454340));
+          const groundBounceHex = (_tType === 'glacier') ? 0x6286b0 : ((_tType === 'forest' || _tType === 'glade' || _tType === 'steppe') ? 0x456e32 : ((_tType === 'desert' || _tType === 'road') ? 0x7c5432 : 0x564e44));
           if (hemiLight) {
-            hemiLight.color.setHex(isDim ? 0x7c9ad4 : (isHeavyMist ? 0xc2d0dc : 0xd8ecff));
-            hemiLight.groundColor.setHex(isDim ? 0x1d2330 : groundBounceHex);
-            hemiLight.intensity = isDim ? 0.24 : (isHeavyMist ? 0.34 : 0.40);
+            hemiLight.color.setHex(isDim ? 0x6f96e8 : (isHeavyMist ? 0xc2d8ee : 0xbce2ff));
+            hemiLight.groundColor.setHex(isDim ? 0x222640 : groundBounceHex);
+            hemiLight.intensity = isDim ? 0.30 : (isHeavyMist ? 0.38 : 0.48);
           }
           if (bounceLight && sp.pos) {
-            bounceLight.color.setHex(isDim ? 0x344664 : groundBounceHex);
-            bounceLight.intensity = isDim ? 0.14 : 0.28;
+            bounceLight.color.setHex(isDim ? 0x3b5888 : groundBounceHex);
+            bounceLight.intensity = isDim ? 0.18 : 0.34;
             bounceLight.position.set(-sp.pos[0], Math.max(120, Math.abs(sp.pos[1]) * 0.45), -sp.pos[2]);
           }
           if (rimLight) {
-            rimLight.color.setHex((_pKey === 'sunset' || _pKey === 'evening') ? 0x8fb0ff : 0xd0e6ff);
-            rimLight.intensity = isDim ? 0.36 : 0.40;
+            rimLight.color.setHex((_pKey === 'sunset' || _pKey === 'evening') ? 0xff9a6e : 0x99d6ff);
+            rimLight.intensity = isDim ? 0.44 : 0.48;
           }
           window.__targetExposure = isDim ? 1.18 : (isHeavyMist ? 0.96 : 1.02);
 
@@ -253,6 +253,7 @@
         let grp = findEntity3DGroup(opts.id);
         const skillsNow = Boolean(window.__DND_CLIENT_SKILLS__);
         if (grp && opts.rebuildIfChanged && (grp.userData.tokenName !== opts.tokenName || !grp.userData.hasRealisticMesh || grp.userData.skillsLoaded !== skillsNow)) {
+          grp.userData._disposed = true;
           threeRoomGroup.remove(grp);
           if (typeof unregisterDynamicEntity === 'function') unregisterDynamicEntity(grp);
           grp = null;
@@ -529,8 +530,8 @@
         ctx.drawImage(cv, 0, 0);
         if (preset && preset.torso && preset.key !== 'wizard') {
           ctx.globalCompositeOperation = 'color';
-          ctx.globalAlpha = (preset.key === 'rogue') ? 0.25 : 0.45;
-          ctx.fillStyle = preset.torso;
+          ctx.globalAlpha = (preset.key === 'rogue') ? 0.42 : 0.52;
+          ctx.fillStyle = (preset.key === 'rogue') ? '#1f7a68' : preset.torso;
           ctx.fillRect(0, 0, sz, sz);
           ctx.globalAlpha = 1.0;
         }
@@ -576,6 +577,190 @@
       return g;
     }
 
+    const _HAND_GRIP_POSES = {
+      none:   { thumb: [0.20, 0.20, 0.14], fingers: [[0.18, 0.22, 0.14], [0.24, 0.28, 0.18], [0.30, 0.34, 0.22], [0.36, 0.40, 0.26]] },
+      open:   { thumb: [0.05, 0.06, 0.04], fingers: [[0.06, 0.08, 0.05], [0.08, 0.10, 0.06], [0.10, 0.12, 0.08], [0.14, 0.16, 0.10]] },
+      sword:  { thumb: [0.56, 0.60, 0.44], fingers: [[0.96, 1.15, 0.82], [1.02, 1.20, 0.86], [1.04, 1.20, 0.86], [0.98, 1.12, 0.80]] },
+      dagger: { thumb: [0.58, 0.62, 0.45], fingers: [[0.98, 1.16, 0.84], [1.04, 1.22, 0.88], [1.06, 1.22, 0.88], [1.00, 1.14, 0.82]] },
+      hammer: { thumb: [0.55, 0.58, 0.42], fingers: [[0.94, 1.14, 0.80], [1.00, 1.18, 0.84], [1.02, 1.18, 0.84], [0.96, 1.10, 0.78]] },
+      staff:  { thumb: [0.46, 0.50, 0.36], fingers: [[0.82, 0.96, 0.66], [0.86, 1.00, 0.70], [0.88, 1.00, 0.70], [0.82, 0.94, 0.64]] },
+      bow:    { thumb: [0.44, 0.48, 0.35], fingers: [[0.84, 0.98, 0.68], [0.88, 1.02, 0.72], [0.90, 1.02, 0.72], [0.84, 0.96, 0.66]] },
+      draw:   { thumb: [0.24, 0.22, 0.16], fingers: [[0.62, 0.76, 0.42], [0.66, 0.80, 0.46], [0.62, 0.74, 0.40], [0.78, 0.92, 0.64]] },
+      shield: { thumb: [0.44, 0.46, 0.34], fingers: [[0.80, 0.96, 0.68], [0.84, 1.00, 0.72], [0.86, 1.00, 0.72], [0.80, 0.92, 0.64]] },
+      tome:   { thumb: [0.26, 0.24, 0.16], fingers: [[0.28, 0.34, 0.22], [0.32, 0.38, 0.26], [0.36, 0.42, 0.30], [0.40, 0.46, 0.32]] },
+      reins:  { thumb: [0.48, 0.46, 0.32], fingers: [[0.72, 0.86, 0.58], [0.76, 0.90, 0.62], [0.78, 0.90, 0.62], [0.74, 0.84, 0.56]] },
+    };
+
+    const _ITEM_GRIP_SPECS = {
+      sword:   { thumbW: 0.68, distW: 0.64, upW: 0.36, faceMode: 'palm',        palmFrac: 0.78, palmShift: 0.34, faceShift: 0.0  },
+      hammer:  { thumbW: 0.70, distW: 0.60, upW: 0.42, faceMode: 'forward',     palmFrac: 0.78, palmShift: 0.34, faceShift: 0.0  },
+      dagger:  { thumbW: 0.26, distW: 0.95, upW: 0.10, faceMode: 'palm',        palmFrac: 0.76, palmShift: 0.33, faceShift: 0.0  },
+      daggers: { thumbW: 0.26, distW: 0.95, upW: 0.10, faceMode: 'palm',        palmFrac: 0.76, palmShift: 0.33, faceShift: 0.0  },
+      staff:   { thumbW: 0.88, distW: 0.20, upW: 0.44, faceMode: 'distal',      palmFrac: 0.76, palmShift: 0.32, faceShift: 0.0  },
+      shield:  { thumbW: 0.15, distW: 0.12, upW: 0.98, faceMode: 'outward',     palmFrac: 0.58, palmShift: -0.10, faceShift: 0.0 },
+      tome:    { thumbW: 0.42, distW: 0.86, upW: 0.15, faceMode: 'palm_out',    palmFrac: 0.74, palmShift: 0.18, faceShift: 0.65 },
+      bow:     { thumbW: 0.18, distW: 0.00, upW: 0.98, faceMode: 'forward_out', palmFrac: 0.76, palmShift: 0.28, faceShift: 0.0  },
+      default: { thumbW: 0.62, distW: 0.68, upW: 0.28, faceMode: 'palm',        palmFrac: 0.76, palmShift: 0.34, faceShift: 0.0  },
+    };
+
+    function _collectHandRig(clone, handBone, foreArmBone, isRight, boneByIndex) {
+      if (!handBone) return null;
+      const chains = { thumb: [], index: [], middle: [], ring: [], pinky: [] };
+      const idxGroups = isRight
+        ? { thumb: [29, 30, 31], index: [32, 33, 34], middle: [35, 36, 37], ring: [38, 39, 40], pinky: [41, 42, 43] }
+        : { thumb: [10, 11, 12], index: [13, 14, 15], middle: [16, 17, 18], ring: [19, 20, 21], pinky: [22, 23, 24] };
+      let foundCount = 0;
+      for (const [fn, ids] of Object.entries(idxGroups)) {
+        for (const id of ids) {
+          if (boneByIndex[id]) { chains[fn].push(boneByIndex[id]); foundCount++; }
+        }
+      }
+      if (foundCount === 0) {
+        const prefix = isRight ? 'righthand' : 'lefthand';
+        const byName = [];
+        handBone.traverse(o => { if (o.isBone && o !== handBone) byName.push(o); });
+        for (const fn of Object.keys(chains)) {
+          chains[fn] = byName
+            .filter(o => { const l = (o.name || '').toLowerCase(); return l.includes(fn) && (l.includes(prefix) || !l.includes(isRight ? 'left' : 'right')); })
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        }
+      }
+      clone.updateMatrixWorld(true);
+      const wristW = new THREE.Vector3(); handBone.getWorldPosition(wristW);
+      const idxProx = chains.index[0] || chains.thumb[0];
+      const midProx = chains.middle[0] || chains.index[0] || handBone.children[0];
+      const pnkProx = chains.pinky[0] || chains.ring[0] || chains.middle[0];
+      const vTmp = new THREE.Vector3();
+      const idxW = new THREE.Vector3(), midW = new THREE.Vector3(), pnkW = new THREE.Vector3();
+      if (midProx) midProx.getWorldPosition(midW); else { handBone.getWorldDirection(midW); midW.multiplyScalar(0.05).add(wristW); }
+      if (idxProx) idxProx.getWorldPosition(idxW); else idxW.copy(midW);
+      if (pnkProx) pnkProx.getWorldPosition(pnkW); else pnkW.copy(midW);
+
+      const palmVec = midW.clone().sub(wristW);
+      const palmLen = Math.max(0.015, palmVec.length());
+      const distalDir = palmVec.clone().divideScalar(palmLen);
+      const thumbwardDir = idxW.clone().sub(pnkW);
+      if (thumbwardDir.lengthSq() < 1e-8) thumbwardDir.set(0, 1, 0);
+      else thumbwardDir.normalize();
+
+      const palmInwardDir = isRight
+        ? new THREE.Vector3().crossVectors(thumbwardDir, distalDir).normalize()
+        : new THREE.Vector3().crossVectors(distalDir, thumbwardDir).normalize();
+      const thumbOppDir = palmInwardDir.clone().multiplyScalar(0.78).addScaledVector(thumbwardDir, -0.62).normalize();
+
+      const bp = new THREE.Vector3(), cp = new THREE.Vector3(), bDir = new THREE.Vector3(), wAx = new THREE.Vector3();
+      const bq = new THREE.Quaternion(), qTmp = new THREE.Quaternion();
+      const setupChain = (bList, isThumb) => bList.map((b, bi) => {
+        b.getWorldPosition(bp);
+        b.getWorldQuaternion(bq);
+        if (bi < bList.length - 1) {
+          bList[bi + 1].getWorldPosition(cp);
+          bDir.copy(cp).sub(bp);
+        } else {
+          bDir.set(0, 1, 0).applyQuaternion(bq);
+        }
+        if (bDir.lengthSq() < 1e-8) bDir.set(0, 1, 0).applyQuaternion(bq);
+        else bDir.normalize();
+        const targetDir = isThumb ? thumbOppDir : palmInwardDir;
+        wAx.crossVectors(bDir, targetDir);
+        if (wAx.lengthSq() < 1e-8) wAx.copy(thumbwardDir);
+        else wAx.normalize();
+        const curlLocalAxis = wAx.clone().applyQuaternion(qTmp.copy(bq).invert()).normalize();
+        b.userData.restQuat = b.quaternion.clone();
+        b.userData.curlLocalAxis = curlLocalAxis;
+        return b;
+      });
+      return {
+        isRight, handBone, foreArmBone, wristW, palmVec, palmLen, distalDir, thumbwardDir, palmInwardDir,
+        chains: {
+          thumb: setupChain(chains.thumb, true),
+          index: setupChain(chains.index, false),
+          middle: setupChain(chains.middle, false),
+          ring: setupChain(chains.ring, false),
+          pinky: setupChain(chains.pinky, false),
+        }
+      };
+    }
+
+    function _applyHandGrip(rig, poseKey, scale = 1.0) {
+      if (!rig || !rig.chains) return;
+      const spec = _HAND_GRIP_POSES[poseKey] || _HAND_GRIP_POSES.none;
+      const qCurl = new THREE.Quaternion();
+      const applyList = (bones, angles) => {
+        for (let i = 0; i < bones.length; i++) {
+          const b = bones[i];
+          if (!b.userData.restQuat || !b.userData.curlLocalAxis) continue;
+          const ang = (angles[Math.min(i, angles.length - 1)] || 0) * scale;
+          qCurl.setFromAxisAngle(b.userData.curlLocalAxis, ang);
+          b.quaternion.copy(b.userData.restQuat).multiply(qCurl);
+        }
+      };
+      applyList(rig.chains.thumb, spec.thumb);
+      const fNames = ['index', 'middle', 'ring', 'pinky'];
+      for (let fi = 0; fi < fNames.length; fi++) {
+        applyList(rig.chains[fNames[fi]], spec.fingers[fi]);
+      }
+      rig.currentPose = poseKey;
+    }
+
+    window.poseCharacterHands = function poseCharacterHands(grp, leftKey, rightKey, scale = 1.0) {
+      if (!grp || !grp.userData) return;
+      const hrs = grp.userData.handRigs;
+      if (hrs) {
+        if (hrs.left && leftKey) _applyHandGrip(hrs.left, leftKey, scale);
+        if (hrs.right && rightKey) _applyHandGrip(hrs.right, rightKey, scale);
+      }
+      const ph = grp.userData.procHands;
+      if (ph && typeof window._poseProceduralHand === 'function') {
+        if (ph.left && leftKey) window._poseProceduralHand(ph.left, leftKey);
+        if (ph.right && rightKey) window._poseProceduralHand(ph.right, rightKey);
+      }
+    };
+
+    function _seatItemInHand(clone, rig, itemGrp, itemKind) {
+      if (!rig || !rig.handBone || !itemGrp) return;
+      const key = String(itemKind || 'default').toLowerCase();
+      const spec = _ITEM_GRIP_SPECS[key] || _ITEM_GRIP_SPECS.default;
+      const { handBone, wristW, palmVec, palmLen, distalDir, thumbwardDir, palmInwardDir } = rig;
+      const cwq = new THREE.Quaternion(), bwq = new THREE.Quaternion();
+      clone.updateMatrixWorld(true);
+      clone.getWorldQuaternion(cwq);
+      handBone.getWorldQuaternion(bwq);
+      const charUpW = new THREE.Vector3(0, 1, 0).applyQuaternion(cwq);
+      const charFwdW = new THREE.Vector3(0, 0, 1).applyQuaternion(cwq);
+
+      const yAx = new THREE.Vector3()
+        .addScaledVector(thumbwardDir, spec.thumbW)
+        .addScaledVector(distalDir, spec.distW)
+        .addScaledVector(charUpW, spec.upW)
+        .normalize();
+
+      const desiredZ = new THREE.Vector3();
+      if (spec.faceMode === 'forward') desiredZ.copy(charFwdW);
+      else if (spec.faceMode === 'distal') desiredZ.copy(distalDir);
+      else if (spec.faceMode === 'outward') desiredZ.copy(palmInwardDir).multiplyScalar(-0.82).addScaledVector(charFwdW, 0.52).normalize();
+      else if (spec.faceMode === 'palm_out') desiredZ.copy(palmInwardDir);
+      else if (spec.faceMode === 'forward_out') desiredZ.copy(charFwdW).multiplyScalar(0.92).addScaledVector(palmInwardDir, -0.35).normalize();
+      else desiredZ.copy(palmInwardDir);
+
+      // Build right-handed basis matching (+Y = yAx, +Z ~ desiredZ): X = cross(Y, desiredZ), Z = cross(X, Y)
+      const xAx = new THREE.Vector3().crossVectors(yAx, desiredZ);
+      if (xAx.lengthSq() < 1e-6) xAx.crossVectors(yAx, distalDir.lengthSq() > 0 ? distalDir : charUpW);
+      xAx.normalize();
+      const zAx = new THREE.Vector3().crossVectors(xAx, yAx).normalize();
+
+      const rotM = new THREE.Matrix4().makeBasis(xAx, yAx, zAx);
+      const desiredWQuat = new THREE.Quaternion().setFromRotationMatrix(rotM);
+      itemGrp.quaternion.copy(bwq.clone().invert().multiply(desiredWQuat));
+
+      const gripWorld = wristW.clone()
+        .addScaledVector(palmVec, spec.palmFrac)
+        .addScaledVector(palmInwardDir, palmLen * spec.palmShift);
+      if (spec.faceShift) gripWorld.addScaledVector(zAx, spec.faceShift);
+      handBone.worldToLocal(gripWorld);
+      itemGrp.position.copy(gripWorld);
+    }
+
     function addVolumetricEntity_spec(_E) {
       with (_E) {
           if (visualSpec.model_asset && window.__DND_LOADERS__ && window.__DND_LOADERS__.gltf) {
@@ -598,8 +783,22 @@
             };
 
             const instantiateGltf = (gltfData) => {
+              if (grp.userData._disposed) return;
+              // Purge any procedural stand-in children & stale procedural limb refs so swapped characters only ever have 2 arms
+              for (let ci = targetCharGrp.children.length - 1; ci >= 0; ci--) {
+                const kid = targetCharGrp.children[ci];
+                if (kid && (kid.userData?.isPlaceholder || kid.userData?.isGltfInstance)) targetCharGrp.remove(kid);
+              }
+              delete grp.userData.procHands;
+              delete grp.userData.cloakMesh;
+              delete grp.userData.leftArmPivot;
+              delete grp.userData.rightArmPivot;
+              grp.userData.lArm = null; grp.userData.rArm = null;
+              grp.userData.lForeArm = null; grp.userData.rForeArm = null;
+              grp.userData.lLeg = null; grp.userData.rLeg = null;
               const utils = (window.THREE_ADDONS && window.THREE_ADDONS.SkeletonUtils);
               const clone = utils ? utils.clone(gltfData.scene) : gltfData.scene.clone(true);
+              clone.userData.isGltfInstance = true;
               const mScale = visualSpec.model_scale || 16.0;
               clone.scale.set(mScale, mScale, mScale);
               clone.updateMatrixWorld(true);
@@ -682,7 +881,7 @@
               let boneHead = null, boneRightHand = null, boneLeftHand = null, boneChest = null;
               let boneLeftArm = null, boneRightArm = null, boneLeftForeArm = null, boneRightForeArm = null;
               let boneLeftLeg = null, boneRightLeg = null, boneLeftShin = null, boneRightShin = null;
-              const fingerBones = [];
+              const boneByIndex = {};
               let hasArmatureCm = false;
               const boneMap = { bone_5: b => boneHead = b, bone_3: b => boneChest = b, bone_9: b => boneLeftHand = b, bone_28: b => boneRightHand = b, bone_7: b => boneLeftArm = b, bone_8: b => boneLeftForeArm = b, bone_26: b => boneRightArm = b, bone_27: b => boneRightForeArm = b, bone_44: b => boneLeftLeg = b, bone_45: b => boneLeftShin = b, bone_48: b => boneRightLeg = b, bone_49: b => boneRightShin = b };
               clone.traverse(o => {
@@ -698,7 +897,7 @@
                 }
                 if (b.startsWith('bone_')) {
                   const idx = parseInt(b.slice(5), 10);
-                  if ((idx >= 10 && idx <= 24) || (idx >= 29 && idx <= 43)) fingerBones.push({ bone: o, idx });
+                  if (!Number.isNaN(idx)) boneByIndex[idx] = o;
                 }
               });
 
@@ -731,6 +930,17 @@
                 rotBone(boneLeftForeArm, pose.l_elbow ?? -0.54, -0.25, 0, 'lForeArm');
                 rotBone(boneRightArm, pose.r_arm_pitch ?? -0.26, 0, pose.arm_adduct ?? 0.42, 'rArm');
                 rotBone(boneRightForeArm, pose.r_elbow ?? -0.54, 0.25, 0, 'rForeArm');
+                if (preset.left_hand === 'tome' && boneLeftHand && boneLeftForeArm) {
+                  clone.updateMatrixWorld(true);
+                  const epW = new THREE.Vector3(), wpW = new THREE.Vector3(), bqW = new THREE.Quaternion();
+                  boneLeftForeArm.getWorldPosition(epW);
+                  boneLeftHand.getWorldPosition(wpW);
+                  boneLeftHand.getWorldQuaternion(bqW);
+                  const faAxis = wpW.sub(epW).normalize().applyQuaternion(bqW.clone().invert()).normalize();
+                  boneLeftHand.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(faAxis, -0.88));
+                }
+                rotBone(boneLeftHand, 0, 0, 0, 'lHand');
+                rotBone(boneRightHand, 0, 0, 0, 'rHand');
                 rotBone(boneLeftLeg, -0.06, 0, -(pose.leg_adduct ?? 0.06), 'lLeg');
                 rotBone(boneLeftShin, 0.10, 0, 0, 'lShin');
                 rotBone(boneRightLeg, -0.06, 0, pose.leg_adduct ?? 0.06, 'rLeg');
@@ -738,13 +948,17 @@
                 rotBone(boneChest, 0, 0, 0, 'chestBone');
               }
 
-              if (isCustomBakedRig && fingerBones.length > 0) {
-                const curlX = new THREE.Vector3(1, 0, 0);
-                fingerBones.forEach(({ bone, idx }) => {
-                  const isThumb = (idx >= 10 && idx <= 12) || (idx >= 29 && idx <= 31);
-                  bone.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(curlX, isThumb ? 0.38 : 0.72));
-                });
-              }
+              const leftHandRig = _collectHandRig(clone, boneLeftHand, boneLeftForeArm, false, boneByIndex);
+              const rightHandRig = _collectHandRig(clone, boneRightHand, boneRightForeArm, true, boneByIndex);
+              grp.userData.handRigs = { left: leftHandRig, right: rightHandRig };
+              const leftKind = preset.left_hand || 'none';
+              const rightKind = preset.right_hand || 'none';
+              const leftPoseKey = leftKind !== 'none' ? leftKind : 'none';
+              const rightPoseKey = rightKind !== 'none' ? rightKind : (leftKind === 'bow' ? 'draw' : 'none');
+              grp.userData.defaultHandPoses = { left: leftPoseKey, right: rightPoseKey };
+              grp.userData.leftHandKind = leftKind;
+              grp.userData.rightHandKind = rightKind;
+              window.poseCharacterHands(grp, leftPoseKey, rightPoseKey);
 
               const cliCfg = (typeof getClientSkillClientCfg === 'function') ? getClientSkillClientCfg() : {};
               const hgParts = boneHead && (!(preset.headgear === 'hood' && isCustomBakedRig)) && (cliCfg.gltf_headgear_recipes || {})[preset.headgear];
@@ -756,38 +970,27 @@
                 buildSkillPartMeshes(boneChest, embParts, { unitScale: boneScale, shadows: true, mats: { trim: new THREE.MeshStandardMaterial({ color: preset.trim || 0x1f6feb, roughness: 0.55 }), gold: new THREE.MeshStandardMaterial({ color: 0xe6b235, metalness: 0.92, roughness: 0.20 }) } });
               }
 
-              clone.updateMatrixWorld(true);
-              const alignWeapon = (handBone, itemGrp, alignCfg) => {
-                if (!alignCfg) { itemGrp.rotation.x = Math.PI / 2; return; }
-                itemGrp.position.set(alignCfg.offset[0], alignCfg.offset[1], alignCfg.offset[2]);
-                clone.updateMatrixWorld(true);
-                const bwq = new THREE.Quaternion(), cwq = new THREE.Quaternion();
-                handBone.getWorldQuaternion(bwq); clone.getWorldQuaternion(cwq);
-                const boneRelQ = cwq.clone().invert().multiply(bwq);
-                const yAx = new THREE.Vector3(...alignCfg.dir).normalize();
-                const edV = new THREE.Vector3(...alignCfg.edge);
-                const xAx = edV.clone().sub(yAx.clone().multiplyScalar(edV.dot(yAx))).normalize();
-                const zAx = new THREE.Vector3().crossVectors(xAx, yAx).normalize();
-                xAx.crossVectors(yAx, zAx).normalize();
-                const desiredQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAx, yAx, zAx));
-                itemGrp.quaternion.copy(boneRelQ.invert().multiply(desiredQ));
-              };
-              grp.userData.weaponMount = null;
+              grp.userData.rightItemGrp = null;
+              grp.userData.leftItemGrp = null;
               if (boneRightHand) {
-                const rightItemGrp = _buildSkillWeaponMesh(preset.right_hand, boneScale, preset);
+                const rightItemGrp = _buildSkillWeaponMesh(rightKind, boneScale, preset);
                 if (rightItemGrp) {
-                  alignWeapon(boneRightHand, rightItemGrp, isCustomBakedRig ? preset.right_align : null);
+                  if (rightHandRig) _seatItemInHand(clone, rightHandRig, rightItemGrp, rightKind);
+                  else rightItemGrp.rotation.x = Math.PI / 2;
                   boneRightHand.add(rightItemGrp);
-                  grp.userData.weaponMount = rightItemGrp;
+                  grp.userData.rightItemGrp = rightItemGrp;
                 }
               }
               if (boneLeftHand) {
-                const leftItemGrp = _buildSkillWeaponMesh(preset.left_hand, boneScale, preset);
+                const leftItemGrp = _buildSkillWeaponMesh(leftKind, boneScale, preset);
                 if (leftItemGrp) {
-                  if (preset.left_hand !== 'shield' && preset.left_hand !== 'bow') alignWeapon(boneLeftHand, leftItemGrp, isCustomBakedRig ? preset.left_align : null);
+                  if (leftHandRig) _seatItemInHand(clone, leftHandRig, leftItemGrp, leftKind);
+                  else leftItemGrp.rotation.x = Math.PI / 2;
                   boneLeftHand.add(leftItemGrp);
+                  grp.userData.leftItemGrp = leftItemGrp;
                 }
               }
+              grp.userData.weaponMount = grp.userData.rArm || grp.userData.rightItemGrp || grp.userData.leftItemGrp;
 
               setupAnimationMixer(gltfData, clone);
               targetCharGrp.add(clone);
@@ -801,6 +1004,7 @@
               if (!String(entityId || '').startsWith('__warm_')) {
                 try {
                   placeholderGrp = new THREE.Group();
+                  placeholderGrp.userData.isPlaceholder = true;
                   const _EPh = Object.assign(Object.create(_E), { charGrp: placeholderGrp });
                   if (isMonster && typeof addVolumetricEntity_monster === 'function') addVolumetricEntity_monster(_EPh);
                   else if (typeof addVolumetricEntity_humanoid === 'function') addVolumetricEntity_humanoid(_EPh);
@@ -809,6 +1013,7 @@
                 } catch (e) { placeholderGrp = null; }
               }
               const _swapIn = (gltf) => {
+                if (grp.userData._disposed || !targetCharGrp) return;
                 if (placeholderGrp && placeholderGrp.parent === targetCharGrp) targetCharGrp.remove(placeholderGrp);
                 placeholderGrp = null;
                 modelCache[assetUrl] = gltf;

@@ -140,20 +140,20 @@ codex:
       traveling_peddler:
         name: "Traveling Peddler Pack-Beast"
         parts:
-          - {type: lathe, profile: [[1.9, -8.5], [4.4, -3.5], [4.3, 2.5], [4.8, 5.5], [2.1, 8.2]], segments: 12, scale: [0.85, 1.0, 1.15], pos: [0, 9.2, 0], rot: [1.5708, 0, 0], color: 11895352}
-          - {type: cylinder, fixed: [1.8, 2.9, 7.2, 8], pos: [0, 12.2, 6.8], rot: [0.65, 0, 0], color: 11895352}
-          - {type: cylinder, fixed: [2.2, 2.0, 4.2, 8], pos: [0, 15.0, 9.8], rot: [1.35, 0, 0], color: 11895352}
-          - {type: cylinder, fixed: [0.75, 1.45, 3.4, 7], pos: [0, 14.3, 12.2], rot: [1.65, 0, 0], color: 11895352}
-          - {type: cone, fixed: [0.55, 2.8, 4], mirror_x: 1.15, pos: [1.15, 16.8, 8.6], rot: [-0.18, 0, -0.28], color: 11895352}
+          - {type: lathe, profile: [[1.9, -8.5], [4.4, -3.5], [4.3, 2.5], [4.8, 5.5], [2.1, 8.2]], segments: 14, scale: [0.85, 1.0, 1.15], pos: [0, 9.2, 0], rot: [1.5708, 0, 0], color: 11895352}
+          - {type: cylinder, fixed: [1.8, 2.8, 7.2, 12], pivot: [0, 9.4, 4.4], pos: [0, 12.2, 6.8], rot: [0.65, 0, 0], color: 11895352, key: headPivot}
+          - {type: sphere, fixed: [2.15, 12, 9], scale: [0.88, 0.85, 1.15], pos: [0, 15.0, 9.8], color: 11895352}
+          - {type: cylinder, fixed: [0.75, 1.45, 3.4, 10], pos: [0, 14.3, 12.2], rot: [1.65, 0, 0], color: 11895352}
+          - {type: cylinder, fixed: [0.18, 0.45, 2.6, 8], mirror_x: 1.15, pos: [1.15, 16.8, 8.6], rot: [-0.18, 0, -0.28], color: 11895352}
           - {type: box, fixed: [8.4, 2.2, 8.0], pos: [0, 12.2, -0.5], color: 8206894}
-          - {type: box, fixed: [2.8, 4.4, 6.2], mirror_x: 4.5, pos: [4.5, 10.2, -1.8], color: 6438948}
+          - {type: cylinder, fixed: [2.0, 2.2, 5.8, 12], mirror_x: 4.5, pos: [4.5, 10.2, -1.8], rot: [1.5708, 0, 0], color: 6438948}
           - {type: box, fixed: [0.6, 4.6, 5.8], mirror_x: 5.9, pos: [5.9, 10.2, -1.8], color: 13149276}
-          - {type: flame, fixed: [2.6, 1.1, 4], pos: [-4.8, 12.2, 3.0], color: 16766720, emissive: 16750899, emissiveIntensity: 1.1}
-          - {type: cone, fixed: [1.0, 6.2, 6], pos: [0, 9.6, -9.8], rot: [-0.95, 0, 0], color: 4860957}
-          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 8], pivot: [-2.4, 8.0, 4.8], pos: [-2.4, 4.0, 4.8], color: 11895352, key: leg_fl}
-          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 8], pivot: [2.4, 8.0, 4.8], pos: [2.4, 4.0, 4.8], color: 11895352, key: leg_fr}
-          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 8], pivot: [-2.4, 8.0, -4.8], pos: [-2.4, 4.0, -4.8], color: 11895352, key: leg_bl}
-          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 8], pivot: [2.4, 8.0, -4.8], pos: [2.4, 4.0, -4.8], color: 11895352, key: leg_br}
+          - {type: flame, fixed: [2.6, 1.1, 6], pos: [-4.8, 12.2, 3.0], color: 16766720, emissive: 16750899, emissiveIntensity: 1.1}
+          - {type: cylinder, fixed: [0.42, 0.18, 6.2, 8], pivot: [0, 9.6, -7.2], pos: [0, 8.6, -9.8], rot: [-0.95, 0, 0], color: 4860957, key: tailPivot}
+          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 10], pivot: [-2.4, 8.0, 4.8], pos: [-2.4, 4.0, 4.8], color: 11895352, key: leg_fl}
+          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 10], pivot: [2.4, 8.0, 4.8], pos: [2.4, 4.0, 4.8], color: 11895352, key: leg_fr}
+          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 10], pivot: [-2.4, 8.0, -4.8], pos: [-2.4, 4.0, -4.8], color: 11895352, key: leg_bl}
+          - {type: cylinder, fixed: [1.15, 0.65, 8.2, 10], pivot: [2.4, 8.0, -4.8], pos: [2.4, 4.0, -4.8], color: 11895352, key: leg_br}
     pet_recipes:
       storm_fox:
         parts:

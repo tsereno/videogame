@@ -813,10 +813,16 @@
         return;
       }
       const skills = window.__DND_CLIENT_SKILLS__ || {}, cliCfg = skills.client || {};
+      if (typeof window.__lwTriggerLocalAction === 'function') window.__lwTriggerLocalAction(cmdText, activePid);
       const isAtk = (typeof classifyWithClientCCELM === 'function' && skills.intent_criteria)
         ? (classifyWithClientCCELM(cmdText.toLowerCase(), skills.intent_criteria, 0.45, '') === 'attack' || /\b(attack|kill|fight|slay|hit|strike)\b/i.test(cmdText))
         : /\b(attack|kill|fight|slay|hit|strike)\b/i.test(cmdText);
       if (isAtk) sfx.playAttack();
+      if (!isAtk && typeof window.triggerHandInteraction === 'function') {
+        if (/\b(take|get|grab|pick|loot|open|unlock|close)\b/i.test(cmdText)) window.triggerHandInteraction(activePid, 'take', 520);
+        else if (/\b(craft|build|repair)\b/i.test(cmdText)) window.triggerHandInteraction(activePid, 'craft', 680);
+        else if (/\b(use|drink|eat|equip|cast|activate|calibrate|drop)\b/i.test(cmdText)) window.triggerHandInteraction(activePid, /\bcast\b/i.test(cmdText) ? 'cast' : 'use', 520);
+      }
       try {
         const resp = await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: cmdText, player_id: activePid }) });
         const data = await resp.json();

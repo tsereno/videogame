@@ -2,6 +2,7 @@
 import os, re, time, math, json, copy, zlib
 from .constants import SAVES_DIR, GRID_SQ
 from .core_models import Choice, evaluate_jev_decision
+from .action_catalog import get_action_catalog_payload, match_character_action, perform_character_action as _run_char_action
 
 
 class SessionLivingWorldMixin:
@@ -883,6 +884,8 @@ class SessionLivingWorldMixin:
         q = re.sub(r"^(?:summon\s+mount|hop\s+on|get\s+on|mount|ride)\s*(?:the\s+)?", "", (query or "").strip(), flags=re.IGNORECASE).strip()
         crit = {k: f"{k} {v['name']} {v.get('desc', '')} {v.get('wildlife_kind', '')}" for k, v in mounts.items()}
         mk = evaluate_jev_decision(q or "ash_drake", {"m": Choice(criteria=crit)})["m"].choice or next(iter(mounts))
+        if "dragon" in q.lower() and "ash_drake" in mounts:
+            mk = "ash_drake"
         md = mounts[mk]
         self._release_ridden_wildlife(p["id"], p["x"] + 24.0, p["y"])
         if md.get("wildlife_kind") == "peddler" or mk == "traveling_peddler":
@@ -1432,6 +1435,9 @@ class SessionLivingWorldMixin:
             "fx_events": fx,
         }
 
+    def perform_character_action(self, query: str, player_id: str = None) -> str:
+        return _run_char_action(self, query, player_id)
+
     def handle_living_world_command(self, user_input: str, player_id: str = None, explicit_only: bool = False) -> str | None:
         cmd = (user_input or "").strip()
         low = cmd.lower()
@@ -1530,6 +1536,9 @@ class SessionLivingWorldMixin:
         if re.match(r"^(?:reflect|breakfast|harmony|vignette)\b", low):
             nh = self.get_narrative_harmony_payload(player_id)
             return f"☕ [HARMONY — {nh['guild_title']} | Climax Prep +{nh['climax_prep_pct']}%]: {nh['breakfast_scene']}\n🔍 Environmental Vignette: {nh['vignette'] or 'Quiet flagstones ahead.'}\n💬 {nh['reaction']}"
+        matched_act = match_character_action(low, explicit_only=True)
+        if matched_act:
+            return self.perform_character_action(matched_act["id"], player_id)
 
         if explicit_only or not criteria:
             return None

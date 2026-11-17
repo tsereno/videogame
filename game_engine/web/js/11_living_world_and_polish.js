@@ -34,6 +34,11 @@
     localStream: null,
     lastVoicePoll: 0,
     voiceEnabled: false,
+    localAction: null,
+    climbTarget: null,
+    mountedDragon: false,
+    actionsDrawerOpen: false,
+    sleepSparkAt: 0,
   };
   window.__LW_STATE__ = LW_STATE;
 
@@ -89,6 +94,12 @@
         const ci = data.combat_info;
         if (typeof triggerWeaponSwing === 'function') triggerWeaponSwing(_pid(), /bow|staff|scepter/i.test(ci.weapon || ''), 280);
         if (typeof spawnAeonwardFloatingDamage === 'function') spawnAeonwardFloatingDamage(ci.target_x || (lastPlayerPos.x + 60), ci.target_y || lastPlayerPos.y, `-${ci.damage}`, ci.is_crit ? 'crit' : 'hit');
+      } else if (typeof window.triggerHandInteraction === 'function' && /craft|build|repair|gather|use|equip|mount|warm/i.test(action)) {
+        window.triggerHandInteraction(_pid(), /craft|build|repair/.test(action) ? 'craft' : (/gather|use|equip/.test(action) ? 'take' : 'warm'), 540);
+      }
+      if (action === 'dismount') {
+        LW_STATE.mountedDragon = false;
+        if (window.__dragonCtrl && window.__dragonCtrl.dismount) window.__dragonCtrl.dismount();
       }
       if (typeof applyCommonServerDelta === 'function') applyCommonServerDelta(data, { updateRoomOnTransitionOnly: true });
       if (data.scene_3d) {
@@ -270,20 +281,315 @@
     lwShowToast('🪝 Grappling Hook Zip!');
   }
 
+  function _lookupCharAction(q) {
+    const cat = (window.__DND_CLIENT_SKILLS__ && Array.isArray(window.__DND_CLIENT_SKILLS__.action_catalog))
+      ? window.__DND_CLIENT_SKILLS__.action_catalog : [];
+    const raw = String(q || '').trim().toLowerCase();
+    if (!raw || !cat.length) return null;
+    const norm = raw.replace(/[^a-z0-9\s]/g, ' ').trim();
+    const normUs = norm.replace(/\s+/g, '_');
+    let found = cat.find(a => a.id === normUs || a.id === norm || String(a.label || '').toLowerCase() === norm);
+    if (found) return found;
+    found = cat.find(a => (a.aliases || '').split(/\s+/).some(al => al && (al.replace(/_/g, ' ') === norm || ((al.includes('_') || al.length >= 4) && norm.includes(al.replace(/_/g, ' '))))));
+    return found || null;
+  }
+
+  window.__lwTriggerLocalAction = function (query, pid = null) {
+    const act = _lookupCharAction(query);
+    if (!act) return null;
+    const now = performance.now();
+    const wx = (typeof lastPlayerPos !== 'undefined') ? _worldX(lastPlayerPos.x) : 0;
+    const wz = (typeof lastPlayerPos !== 'undefined') ? _worldZ(lastPlayerPos.y) : 0;
+    const fStr = (typeof lastFacing !== 'undefined' ? lastFacing : 'east').toLowerCase();
+    let fx = fStr.includes('east') ? 1 : fStr.includes('west') ? -1 : 0;
+    let fz = fStr.includes('south') ? 1 : fStr.includes('north') ? -1 : 0;
+    if (!fx && !fz) fx = 1;
+    const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+
+    LW_STATE.localAction = {
+      id: act.id, posture: act.posture, phys_mode: act.phys_mode, hand_pose: act.hand_pose,
+      label: act.label, icon: act.icon, startedAt: now, endsAt: now + (act.duration || 2.5) * 1000,
+    };
+    LW_STATE.climbTarget = null;
+    window.__lwLocalPosture = act.posture;
+
+    const pm = act.phys_mode || '';
+    if (pm === 'jump' || pm === 'double_jump' || pm === 'broad_leap' || pm === 'vault' || pm === 'uppercut_hop' || pm === 'backflip' || pm === 'cartwheel' || pm === 'roll') {
+      if (pm === 'double_jump') LW_STATE.elevY = Math.max(LW_STATE.elevY, 12);
+      triggerJump();
+      if (pm === 'broad_leap' || pm === 'vault' || pm === 'roll') {
+        if (typeof doMoveStep === 'function') doMoveStep(fx * 96, fz * 96);
+      }
+    } else if (pm === 'dash' || pm === 'slide' || pm === 'sidestep' || pm === 'lunge_fwd') {
+      if (typeof doMoveStep === 'function') doMoveStep(fx * (pm === 'sidestep' ? -64 : 110), fz * (pm === 'sidestep' ? 64 : 110));
+      window.spawnHitSparks3D(wx, _groundY(wx, wz) + 4, wz, 0xc8d8e8, 8);
+    } else if (pm === 'climb_tree' || pm === 'climb_ladder' || pm === 'perch') {
+      const pool = pm === 'climb_ladder' ? (window.__climbableLadders || []) : (window.__climbableTrees || []);
+      let best = null, bestD = 99999;
+      for (let i = 0; i < pool.length; i++) {
+        const t = pool[i];
+        const d = Math.hypot(t.x - wx, t.z - wz);
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      if (best) {
+        const stopDist = pm === 'climb_ladder' ? 6 : 10;
+        const dx = best.x - wx, dz = best.z - wz, dist = Math.hypot(dx, dz) || 1;
+        const tx = best.x - (dx / dist) * stopDist, tz = best.z - (dz / dist) * stopDist;
+        const nGx = Math.max(24, Math.min(_roomW() - 24, tx + _roomW() * 0.5));
+        const nGy = Math.max(24, Math.min(_roomH() - 24, tz + _roomH() * 0.5));
+        if (typeof startTacticalMouseMovement === 'function') startTacticalMouseMovement(nGx, nGy);
+        else if (typeof doMoveStep === 'function') doMoveStep(nGx - lastPlayerPos.x, nGy - lastPlayerPos.y);
+        const topElev = Math.max(32, Math.min(62, (best.topY || 48) - _groundY(best.x, best.z)));
+        LW_STATE.climbTarget = { kind: pm, x: nGx - _roomW() * 0.5, z: nGy - _roomH() * 0.5, topElev, perching: pm === 'perch', startedAt: now };
+      } else {
+        LW_STATE.climbing = true;
+      }
+    } else if (pm === 'drop_down') {
+      LW_STATE.climbing = false; LW_STATE.climbTarget = null;
+    } else if (pm === 'hunt_lunge') {
+      const victim = (window.__outdoorWildlifeCtrl && window.__outdoorWildlifeCtrl.slayNearest)
+        ? window.__outdoorWildlifeCtrl.slayNearest(wx, wz) : null;
+      if (victim) {
+        const vx = victim.x - wx, vz = victim.z - wz, vd = Math.hypot(vx, vz) || 1;
+        if (vd > 24 && typeof doMoveStep === 'function') {
+          const step = Math.min(180, vd - 18);
+          doMoveStep((vx / vd) * step, (vz / vd) * step);
+        }
+        window.spawnHitSparks3D(victim.x, _groundY(victim.x, victim.z) + 4, victim.z, 0xff5a36, 16);
+      }
+      if (typeof triggerWeaponSwing === 'function') triggerWeaponSwing(pid || _pid(), false, 380);
+    } else if (act.id === 'build_campfire' || act.id === 'roast_meat' || act.id === 'cook_stew') {
+      if (window.__dragonCtrl && window.__dragonCtrl.igniteAt) {
+        window.__dragonCtrl.igniteAt(wx + fx * 34, wz + fz * 34, 11, 20);
+      }
+    } else if (act.id === 'summon_dragon') {
+      if (window.__dragonCtrl && window.__dragonCtrl.land) window.__dragonCtrl.land();
+    } else if (act.id === 'mount_dragon') {
+      LW_STATE.mountedDragon = true;
+      if (window.__dragonCtrl && window.__dragonCtrl.mount) window.__dragonCtrl.mount();
+    } else if (act.id === 'dragon_fire') {
+      if (window.__dragonCtrl && window.__dragonCtrl.breatheFire) window.__dragonCtrl.breatheFire(2.6);
+    } else if (pm === 'swing' || pm === 'heavy_cleave' || pm === 'spin_attack' || pm === 'chop') {
+      if (typeof triggerWeaponSwing === 'function') triggerWeaponSwing(pid || _pid(), false, 360);
+    } else if (pm === 'snap_shot' || pm === 'aim_slow') {
+      if (typeof triggerWeaponSwing === 'function') triggerWeaponSwing(pid || _pid(), true, 300);
+    } else if (act.id === 'grapple') {
+      triggerGrapple();
+    }
+    return act;
+  };
+
+  window.lwRunCharAction = async function lwRunCharAction(actionId) {
+    const act = window.__lwTriggerLocalAction(actionId, _pid());
+    if (act) lwShowToast(`${act.icon || '✨'} ${act.label}`);
+    return lwAction('char_action', { action_id: actionId });
+  };
+
+  function _applyPostureKinematics(grp, ch, posture, physMode, ageSec, durSec, nowMs, isLocal, baseScale) {
+    const setLimb = (typeof _setLimbPitch === 'function') ? _setLimbPitch : null;
+    const t = nowMs * 0.001;
+    let yOff = 0, rotX = 0, rotZ = 0, rotYExtra = 0;
+    const ud = grp.userData;
+    const isMovingEnt = (ud.smoothedSpeed || 0) > 0.4;
+
+    if (posture === 'kneel') {
+      yOff = -8.2; rotX = 0.14;
+      if (setLimb) {
+        setLimb(ud.lLeg, -1.12); setLimb(ud.rLeg, 0.48);
+        setLimb(ud.lShin, 1.38); setLimb(ud.rShin, 1.15);
+        setLimb(ud.lArm, -0.36); setLimb(ud.rArm, -0.58);
+      }
+    } else if (posture === 'crouch' || posture === 'sneak') {
+      yOff = -7.0; rotX = posture === 'sneak' ? 0.34 : 0.24;
+      const walkSwing = isMovingEnt ? Math.sin(t * 9.5) * 0.45 : 0;
+      if (setLimb) {
+        setLimb(ud.lLeg, -1.02 + walkSwing); setLimb(ud.rLeg, -1.02 - walkSwing);
+        setLimb(ud.lShin, 1.32); setLimb(ud.rShin, 1.32);
+        setLimb(ud.lArm, -0.55 - walkSwing * 0.5); setLimb(ud.rArm, -0.55 + walkSwing * 0.5);
+      }
+    } else if (posture === 'crawl') {
+      yOff = -9.6; rotX = 1.26;
+      const cw = isMovingEnt ? Math.sin(t * 7.5) * 0.55 : Math.sin(t * 2.2) * 0.15;
+      if (setLimb) {
+        setLimb(ud.lArm, -1.25 + cw); setLimb(ud.rArm, -1.25 - cw);
+        setLimb(ud.lLeg, -0.35 - cw); setLimb(ud.rLeg, -0.35 + cw);
+      }
+    } else if (posture === 'sleep') {
+      yOff = -10.5; rotX = -Math.PI * 0.47; rotZ = 0.08;
+      if (setLimb) {
+        setLimb(ud.lLeg, 0.08); setLimb(ud.rLeg, -0.10);
+        setLimb(ud.lArm, -0.35 + Math.sin(t * 1.4) * 0.05); setLimb(ud.rArm, -0.65);
+      }
+      if (isLocal && (nowMs - (LW_STATE.sleepSparkAt || 0)) > 950) {
+        LW_STATE.sleepSparkAt = nowMs;
+        window.spawnHitSparks3D(grp.position.x, grp.position.y + 8, grp.position.z, 0x79c0ff, 2);
+      }
+    } else if (posture === 'sit') {
+      yOff = -5.4;
+      if (setLimb) {
+        setLimb(ud.lLeg, -1.24); setLimb(ud.rLeg, -1.24);
+        setLimb(ud.lShin, 1.30); setLimb(ud.rShin, 1.30);
+        setLimb(ud.lArm, -0.45); setLimb(ud.rArm, -0.45);
+      }
+    } else if (posture === 'meditate') {
+      yOff = 6.5 + Math.sin(t * 2.4) * 2.2;
+      if (setLimb) {
+        setLimb(ud.lLeg, -1.20); setLimb(ud.rLeg, -1.20);
+        setLimb(ud.lShin, 1.42); setLimb(ud.rShin, 1.42);
+        setLimb(ud.lArm, -0.78); setLimb(ud.rArm, -0.78);
+        setLimb(ud.lForeArm, -0.55); setLimb(ud.rForeArm, -0.55);
+      }
+    } else if (posture === 'climb_tree' || posture === 'climb_ladder') {
+      const cPh = t * 8.5;
+      rotX = 0.08;
+      if (setLimb) {
+        setLimb(ud.lArm, -2.05 + Math.sin(cPh) * 0.65);
+        setLimb(ud.rArm, -2.05 - Math.sin(cPh) * 0.65);
+        setLimb(ud.lLeg, -0.75 - Math.sin(cPh) * 0.55);
+        setLimb(ud.rLeg, -0.75 + Math.sin(cPh) * 0.55);
+        setLimb(ud.lShin, 0.95); setLimb(ud.rShin, 0.95);
+      }
+    } else if (posture === 'defend' || posture === 'parry') {
+      yOff = -2.2; rotX = 0.10;
+      if (setLimb) {
+        setLimb(ud.lArm, -1.10); setLimb(ud.lForeArm, -0.68);
+        setLimb(ud.rArm, -0.52); setLimb(ud.rForeArm, -0.45);
+        setLimb(ud.lLeg, -0.35); setLimb(ud.rLeg, 0.28);
+      }
+    } else if (posture === 'backflip' || posture === 'roll') {
+      const p = Math.min(1, ageSec / Math.max(0.55, durSec));
+      rotX = (posture === 'backflip' ? -1 : 1) * p * Math.PI * 2;
+    } else if (posture === 'cartwheel') {
+      const p = Math.min(1, ageSec / Math.max(0.65, durSec));
+      rotZ = p * Math.PI * 2;
+      if (setLimb) { setLimb(ud.lArm, -2.7); setLimb(ud.rArm, -2.7); }
+    } else if (posture === 'spin') {
+      rotYExtra = Math.min(1, ageSec / Math.max(0.6, durSec)) * Math.PI * 2.5;
+      if (setLimb) { setLimb(ud.lArm, -1.4); setLimb(ud.rArm, -1.4); }
+    } else if (posture === 'wave') {
+      if (setLimb) {
+        setLimb(ud.rArm, -2.35 + Math.sin(t * 11) * 0.35);
+        setLimb(ud.rForeArm, -0.45 + Math.cos(t * 11) * 0.35);
+      }
+    } else if (posture === 'highfive' || posture === 'fistbump' || posture === 'hug') {
+      if (posture === 'highfive') yOff = Math.abs(Math.sin(t * 10)) * 5.2;
+      if (setLimb) {
+        setLimb(ud.rArm, posture === 'highfive' ? -1.85 : (posture === 'fistbump' ? -1.35 : -1.05));
+        if (posture === 'hug') setLimb(ud.lArm, -1.05);
+      }
+    } else if (posture === 'salute') {
+      if (setLimb) { setLimb(ud.rArm, -1.45); setLimb(ud.rForeArm, -1.45); }
+    } else if (posture === 'bow') {
+      rotX = 0.56 * Math.sin(Math.min(1, ageSec / 1.1) * Math.PI * 0.5);
+      if (setLimb) { setLimb(ud.lArm, -0.35); setLimb(ud.rArm, -0.35); }
+    } else if (posture === 'cheer') {
+      yOff = Math.abs(Math.sin(t * 8)) * 4.5;
+      if (setLimb) {
+        setLimb(ud.lArm, -2.35 + Math.sin(t * 9) * 0.25);
+        setLimb(ud.rArm, -2.35 - Math.sin(t * 9) * 0.25);
+      }
+    } else if (posture === 'clap') {
+      const cA = -0.85 + Math.sin(t * 15) * 0.22;
+      if (setLimb) { setLimb(ud.lArm, cA); setLimb(ud.rArm, cA); setLimb(ud.lForeArm, -0.7); setLimb(ud.rForeArm, -0.7); }
+    } else if (posture === 'dance') {
+      yOff = Math.abs(Math.sin(t * 7.5)) * 3.0;
+      rotZ = Math.sin(t * 4.2) * 0.14;
+      if (setLimb) {
+        setLimb(ud.lArm, -1.1 + Math.sin(t * 8.4) * 0.75);
+        setLimb(ud.rArm, -1.1 - Math.sin(t * 8.4) * 0.75);
+        setLimb(ud.lLeg, Math.sin(t * 7.5) * 0.36);
+        setLimb(ud.rLeg, -Math.sin(t * 7.5) * 0.36);
+      }
+    } else if (posture === 'point') {
+      if (setLimb) { setLimb(ud.rArm, -1.48); setLimb(ud.rForeArm, 0.05); }
+    } else if (posture === 'shrug') {
+      yOff = 0.6;
+      if (setLimb) { setLimb(ud.lArm, -0.92); setLimb(ud.rArm, -0.92); setLimb(ud.lForeArm, -0.85); setLimb(ud.rForeArm, -0.85); }
+    } else if (posture === 'warm') {
+      if (setLimb) { setLimb(ud.lArm, -0.82); setLimb(ud.rArm, -0.82); setLimb(ud.lForeArm, -0.28); setLimb(ud.rForeArm, -0.28); }
+    } else if (posture === 'instrument') {
+      rotZ = Math.sin(t * 5.2) * 0.09;
+      if (setLimb) { setLimb(ud.lArm, -0.78); setLimb(ud.rArm, -0.78 + Math.sin(t * 12) * 0.25); }
+    } else if (posture === 'eat') {
+      if (setLimb) { setLimb(ud.rArm, -1.05 + Math.sin(t * 7) * 0.25); setLimb(ud.rForeArm, -1.05); }
+    } else if (posture === 'fly') {
+      rotX = 0.24;
+      if (setLimb) { setLimb(ud.lArm, -1.25); setLimb(ud.rArm, -1.25); setLimb(ud.lLeg, 0.28); setLimb(ud.rLeg, 0.28); }
+    }
+    if (isLocal) {
+      ch.position.y = Math.max(-11.0, (LW_STATE.elevY || 0) + yOff);
+      window.__lwPostureYOffset = yOff;
+    } else {
+      ch.position.y = yOff;
+    }
+    if (physMode === 'sprint' || posture === 'run') {
+      rotX = Math.max(rotX, 0.18);
+    }
+    ch.rotation.x = rotX;
+    ch.rotation.z = rotZ;
+    if (rotYExtra) ch.rotation.y += rotYExtra;
+    if (baseScale) ch.scale.setScalar(baseScale);
+  }
+
   window.__lwTick = function (dtSec, nowMs) {
-    // 1. Physics: Gravity, Input-Buffered Jump, Glider float, Free-Climb, Mount speed
+    // 1. Physics: Gravity, Dragon Aerial Flight, Tree/Ladder Climbing, Mount Speed, 108 Action Postures
     const lab = LW_STATE.lastLw && LW_STATE.lastLw.labyrinth;
     const grav = (lab && lab.curse === 'low_gravity') ? 95 : 225;
     const mountsMap = (LW_STATE.lastLw && LW_STATE.lastLw.mounts) || {};
     const myMountInfo = _mountForPlayer(_pid(), mountsMap);
     const activeMount = mountsMap[_pid()];
-    window.__lwRidingSpeed = Boolean(myMountInfo);
-    let spdMult = (activeMount && activeMount.speed_mult) ? activeMount.speed_mult : 1.0;
+    if (activeMount && activeMount.key === 'ash_drake' && window.__dragonCtrl && !LW_STATE.mountedDragon) {
+      LW_STATE.mountedDragon = true;
+      window.__dragonCtrl.mount();
+    }
+    const dragonState = (window.__dragonCtrl && window.__dragonCtrl.getState) ? window.__dragonCtrl.getState() : null;
+    const ridingSkyDragon = Boolean(LW_STATE.mountedDragon && dragonState && dragonState.ridden);
+    window.__mountedSkyDragon = ridingSkyDragon;
+    window.__lwRidingSpeed = Boolean(myMountInfo) || ridingSkyDragon;
+
+    const actNow = LW_STATE.localAction && (nowMs < LW_STATE.localAction.endsAt) ? LW_STATE.localAction : null;
+    if (LW_STATE.localAction && !actNow) {
+      LW_STATE.localAction = null;
+      LW_STATE.climbTarget = null;
+      window.__lwLocalPosture = null;
+      window.__lwPostureYOffset = 0;
+    }
+
+    let spdMult = (activeMount && activeMount.speed_mult) ? activeMount.speed_mult : (ridingSkyDragon ? 1.85 : 1.0);
+    if (actNow && actNow.phys_mode === 'sprint') spdMult = Math.max(spdMult, 1.58);
+    else if (actNow && (actNow.posture === 'crouch' || actNow.posture === 'sneak')) spdMult *= 0.65;
     if (LW_STATE.gliding) spdMult = Math.max(spdMult, 1.55);
     if (lab && lab.curse === 'hyper_tempo') spdMult *= 1.35;
     window.__lwSpeedMult = spdMult;
 
-    if (LW_STATE.climbing) {
+    const ak = (typeof activeKeys !== 'undefined' && activeKeys) ? activeKeys : null;
+    if (ridingSkyDragon) {
+      const climbPressed = ak && (ak.has(' ') || ak.has('j'));
+      const divePressed = ak && (ak.has('c') || ak.has('x'));
+      if (climbPressed) {
+        LW_STATE.vy = 92;
+      } else if (divePressed) {
+        LW_STATE.vy = -88;
+      } else if (LW_STATE.elevY > 2) {
+        LW_STATE.vy += (-12 - LW_STATE.vy * 0.85) * dtSec;
+      }
+      LW_STATE.elevY = Math.max(0, Math.min(260, LW_STATE.elevY + LW_STATE.vy * dtSec));
+      if (LW_STATE.elevY <= 0.1) LW_STATE.vy = 0;
+    } else if (LW_STATE.climbTarget) {
+      const ct = LW_STATE.climbTarget;
+      const curPx = (typeof lastPlayerPos !== 'undefined') ? _worldX(lastPlayerPos.x) : ct.x;
+      const curPz = (typeof lastPlayerPos !== 'undefined') ? _worldZ(lastPlayerPos.y) : ct.z;
+      const distLeft = Math.hypot(curPx - ct.x, curPz - ct.z);
+      if (distLeft > 36 && (nowMs - (ct.startedAt || 0)) > 4500) {
+        LW_STATE.climbTarget = null;
+      } else {
+        const tgtElev = ct.topElev || 48;
+        if (distLeft <= 42 || (nowMs - (ct.startedAt || 0)) > 1100) {
+          if (LW_STATE.elevY < tgtElev) LW_STATE.elevY = Math.min(tgtElev, LW_STATE.elevY + 34 * dtSec);
+        }
+        LW_STATE.vy = 0;
+      }
+    } else if (LW_STATE.climbing) {
       LW_STATE.elevY = Math.min(72, LW_STATE.elevY + 38 * dtSec);
       LW_STATE.vy = 0;
     } else if (LW_STATE.elevY > 0 || LW_STATE.vy > 0) {
@@ -302,7 +608,7 @@
     }
     window.__lwLocalElevation = LW_STATE.elevY;
 
-    // Apply local elevation & downed/sitting posture to 3D meshes
+    // Apply local elevation, dragon riding posture & 108 action kinematics
     if (typeof threeDynamicEntities !== 'undefined' && Array.isArray(threeDynamicEntities)) {
       const playersById = {};
       ((typeof current3DData !== 'undefined' && current3DData && current3DData.players) || []).forEach(pl => { if (pl) playersById[pl.id] = pl; });
@@ -312,13 +618,35 @@
         const ch = grp.userData && (grp.userData.charGrp || grp.userData.charGroup);
         if (!ch) continue;
         const eid = grp.userData.entityId;
+        const isLocal = (eid === _pid());
         const pData = playersById[eid];
-        if (pData) {
-          const mInfo = _mountForPlayer(eid, mountsMap);
-          if (!pData.is_downed && mInfo) {
+        if (pData || isLocal) {
+          const isDowned = Boolean(pData && pData.is_downed);
+          const mInfo = pData ? _mountForPlayer(eid, mountsMap) : null;
+          if (isLocal && ridingSkyDragon && !isDowned) {
+            grp.userData.isDoingAction = true;
+            ch.position.x = 0; ch.position.z = 0;
+            ch.position.y = LW_STATE.elevY + 7.4;
+            ch.rotation.x = LW_STATE.elevY > 4 ? 0.14 : 0.04;
+            ch.rotation.z = 0;
+            if (typeof _setLimbPitch === 'function') {
+              _setLimbPitch(grp.userData.lLeg, -0.82); _setLimbPitch(grp.userData.rLeg, -0.82);
+              if (grp.userData.lShin) _setLimbPitch(grp.userData.lShin, 0.88);
+              if (grp.userData.rShin) _setLimbPitch(grp.userData.rShin, 0.88);
+              if (!grp.userData.isSwinging && !grp.userData.isInteracting) {
+                if (grp.userData.lArm) _setLimbPitch(grp.userData.lArm, -0.62);
+                if (grp.userData.rArm) _setLimbPitch(grp.userData.rArm, -0.62);
+              }
+            }
+            if (!grp.userData._reinsHandsApplied && typeof window.poseCharacterHands === 'function') {
+              window.poseCharacterHands(grp, 'reins', 'reins');
+              grp.userData._reinsHandsApplied = true;
+            }
+            grp.userData._wasRiding = true;
+          } else if (!isDowned && mInfo) {
             const mg = LW_STATE.activeMountMeshes && LW_STATE.activeMountMeshes[mInfo.driverId];
             if (!mInfo.isPassenger && mg) {
-              const elevY = (eid === _pid()) ? LW_STATE.elevY : 0;
+              const elevY = isLocal ? LW_STATE.elevY : 0;
               const spd = grp.userData.smoothedSpeed || 0;
               const moving = spd > 0.25;
               const phase = nowMs * 0.012;
@@ -333,11 +661,16 @@
                 if (refs.leg_br) refs.leg_br.rotation.x = swing;
                 if (refs.leg_fr) refs.leg_fr.rotation.x = -swing;
                 if (refs.leg_bl) refs.leg_bl.rotation.x = -swing;
+                if (refs.headPivot) {
+                  refs.headPivot.rotation.x = moving ? (Math.sin(phase * 2) * 0.08 + 0.06) : (Math.sin(nowMs * 0.0022) * 0.09);
+                  refs.headPivot.rotation.y = moving ? 0 : Math.sin(nowMs * 0.0014) * 0.16;
+                }
+                if (refs.tailPivot) refs.tailPivot.rotation.y = Math.sin(nowMs * (moving ? 0.012 : 0.004)) * 0.28;
               }
             }
             const saddleY = (mg && mg.userData && mg.userData.saddleY) || (mInfo.mount && mInfo.mount.saddle_y) || 12.2;
             const mountBob = (mg && mg.userData && mg.userData._trotBob) || 0;
-            ch.position.y = (saddleY - 9.8) + mountBob + (eid === _pid() ? LW_STATE.elevY : 0);
+            ch.position.y = (saddleY - 9.8) + mountBob + (isLocal ? LW_STATE.elevY : 0);
             if (mInfo.isPassenger && mg) {
               ch.position.x = (mg.position.x - grp.position.x) - Math.sin(mg.rotation.y) * 5.8;
               ch.position.z = (mg.position.z - grp.position.z) - Math.cos(mg.rotation.y) * 5.8;
@@ -347,12 +680,20 @@
             }
             ch.rotation.x = (grp.userData.smoothedSpeed || 0) > 0.25 ? 0.08 : 0.02;
             if (typeof _setLimbPitch === 'function') {
-              _setLimbPitch(grp.userData.lLeg, -0.78);
-              _setLimbPitch(grp.userData.rLeg, -0.78);
+              _setLimbPitch(grp.userData.lLeg, -0.78); _setLimbPitch(grp.userData.rLeg, -0.78);
               if (grp.userData.lShin) _setLimbPitch(grp.userData.lShin, 0.82);
               if (grp.userData.rShin) _setLimbPitch(grp.userData.rShin, 0.82);
-              if (grp.userData.lArm && !grp.userData.isSwinging) _setLimbPitch(grp.userData.lArm, -0.42);
-              if (grp.userData.rArm && !grp.userData.isSwinging) _setLimbPitch(grp.userData.rArm, -0.42);
+              if (!grp.userData.isSwinging && !grp.userData.isInteracting) {
+                if (grp.userData.lArm) _setLimbPitch(grp.userData.lArm, -0.46);
+                if (grp.userData.rArm) _setLimbPitch(grp.userData.rArm, -0.46);
+                if (grp.userData.lForeArm) _setLimbPitch(grp.userData.lForeArm, -0.48);
+                if (grp.userData.rForeArm) _setLimbPitch(grp.userData.rForeArm, -0.48);
+              }
+            }
+            if (!grp.userData._reinsHandsApplied && typeof window.poseCharacterHands === 'function') {
+              const defH = grp.userData.defaultHandPoses || {};
+              window.poseCharacterHands(grp, defH.left === 'none' ? 'reins' : defH.left, defH.right === 'none' || defH.right === 'draw' ? 'reins' : defH.right);
+              grp.userData._reinsHandsApplied = true;
             }
             if (grp.userData.lLeg && (!grp.userData.lLeg.userData || !grp.userData.lLeg.userData.baseQuat)) grp.userData.lLeg.rotation.z = -0.24;
             if (grp.userData.rLeg && (!grp.userData.rLeg.userData || !grp.userData.rLeg.userData.baseQuat)) grp.userData.rLeg.rotation.z = 0.24;
@@ -360,15 +701,45 @@
           } else {
             if (grp.userData._wasRiding) {
               grp.userData._wasRiding = false;
-              ch.position.x = 0; ch.position.z = 0;
+              grp.userData._reinsHandsApplied = false;
+              grp.userData.isDoingAction = false;
+              ch.position.x = 0; ch.position.z = 0; ch.rotation.x = 0; ch.rotation.z = 0;
               if (grp.userData.lLeg && (!grp.userData.lLeg.userData || !grp.userData.lLeg.userData.baseQuat)) grp.userData.lLeg.rotation.z = 0;
               if (grp.userData.rLeg && (!grp.userData.rLeg.userData || !grp.userData.rLeg.userData.baseQuat)) grp.userData.rLeg.rotation.z = 0;
+              if (typeof window.poseCharacterHands === 'function' && grp.userData.defaultHandPoses) {
+                window.poseCharacterHands(grp, grp.userData.defaultHandPoses.left, grp.userData.defaultHandPoses.right);
+              }
             }
-            if (eid === _pid()) ch.position.y += LW_STATE.elevY;
-            if (pData.is_downed) { ch.position.y = -7; ch.rotation.x = 0.65; }
-            else if (pData.emote && pData.emote.posture === 'sit') { ch.position.y = -5; }
-            else if (pData.emote && pData.emote.posture === 'highfive') { ch.position.y += Math.abs(Math.sin(nowMs * 0.014)) * 6; }
-            else if (pData.emote && pData.emote.posture === 'music') { ch.rotation.z = Math.sin(nowMs * 0.008) * 0.08; }
+            const srvEm = (pData && pData.emote && pData.emote.posture) ? pData.emote : null;
+            const activeAct = isLocal ? (actNow || srvEm) : srvEm;
+            if (isDowned) {
+              grp.userData.isDoingAction = true;
+              ch.position.y = -7; ch.rotation.x = 0.65;
+            } else if (activeAct && activeAct.posture) {
+              grp.userData.isDoingAction = true;
+              const startMs = activeAct.startedAt || ((activeAct.ts || 0) * 1000) || nowMs;
+              const ageSec = Math.max(0, (nowMs - startMs) * 0.001);
+              const durSec = activeAct.duration || (activeAct.endsAt ? Math.max(0.6, (activeAct.endsAt - startMs) * 0.001) : 2.5);
+              _applyPostureKinematics(grp, ch, activeAct.posture, activeAct.phys_mode || '', ageSec, durSec, nowMs, isLocal, grp.userData.baseCharScale);
+              if (activeAct.hand_pose && typeof window.poseCharacterHands === 'function') {
+                const hp = activeAct.hand_pose === 'none' ? (grp.userData.defaultHandPoses?.right || 'none') : activeAct.hand_pose;
+                window.poseCharacterHands(grp, hp, hp);
+                grp.userData._emoteHands = true;
+              }
+            } else {
+              if (grp.userData.isDoingAction) {
+                grp.userData.isDoingAction = false;
+                ch.rotation.x = 0; ch.rotation.z = 0;
+              }
+              if (isLocal) {
+                ch.position.y += LW_STATE.elevY;
+                window.__lwPostureYOffset = 0;
+              }
+              if (grp.userData._emoteHands && typeof window.poseCharacterHands === 'function' && grp.userData.defaultHandPoses) {
+                window.poseCharacterHands(grp, grp.userData.defaultHandPoses.left, grp.userData.defaultHandPoses.right);
+                grp.userData._emoteHands = false;
+              }
+            }
           }
         }
         const mData = monById[eid];
@@ -397,6 +768,61 @@
       sp.mat.opacity = 1.0 - (sp.age / sp.life);
     }
 
+    // Animate autonomous Living World wildlife (deer, wolves, unmounted peddlers)
+    if (Array.isArray(LW_STATE.wildlifeAnim)) {
+      for (let wi = 0; wi < LW_STATE.wildlifeAnim.length; wi++) {
+        const wa = LW_STATE.wildlifeAnim[wi];
+        if (!wa.grp || !wa.grp.parent) continue;
+        const t = nowMs * 0.001 + wa.phase;
+        const roamA = t * (wa.kind === 'wolf' ? 0.48 : (wa.kind === 'peddler' ? 0.22 : 0.30));
+        const isGrazing = (wa.kind === 'deer') && ((t % 6.5) > 3.2);
+        const tgtX = wa.homeX + (isGrazing ? wa.offX : Math.cos(roamA) * wa.roamR);
+        const tgtZ = wa.homeZ + (isGrazing ? wa.offZ : Math.sin(roamA * 0.85) * wa.roamR * 0.75);
+        if (!isGrazing) { wa.offX = tgtX - wa.homeX; wa.offZ = tgtZ - wa.homeZ; }
+        const vx = (tgtX - wa.curX) * Math.min(1, dtSec * 1.6);
+        const vz = (tgtZ - wa.curZ) * Math.min(1, dtSec * 1.6);
+        const stepD = Math.hypot(vx, vz) / Math.max(0.001, dtSec);
+        wa.curX += vx; wa.curZ += vz;
+        const gy = _groundY(wa.curX, wa.curZ);
+        const moving = stepD > 1.2 && !isGrazing;
+        const trotPhase = t * (wa.kind === 'wolf' ? 9.2 : 6.8);
+        const legAmp = moving ? Math.min(0.62, stepD * 0.028 + 0.26) : 0;
+        const swing = Math.sin(trotPhase) * legAmp;
+        wa.grp.position.set(wa.curX, gy + (moving ? Math.abs(Math.sin(trotPhase * 2)) * 0.45 : 0), wa.curZ);
+        if (stepD > 0.6) {
+          const desY = Math.atan2(vx, vz);
+          let dy = desY - wa.yaw;
+          while (dy > Math.PI) dy -= Math.PI * 2;
+          while (dy < -Math.PI) dy += Math.PI * 2;
+          wa.yaw += Math.max(-dtSec * 4.0, Math.min(dtSec * 4.0, dy));
+        }
+        wa.grp.rotation.y = wa.yaw;
+        if (wa.legs && wa.legs.length === 4) {
+          wa.legs[0].rotation.x = swing;
+          wa.legs[3].rotation.x = swing;
+          wa.legs[1].rotation.x = -swing;
+          wa.legs[2].rotation.x = -swing;
+        }
+        if (wa.headPivot) {
+          if (isGrazing) {
+            wa.headPivot.rotation.x = 0.68 + Math.abs(Math.sin(t * 4.2)) * 0.16;
+            wa.headPivot.rotation.y = Math.sin(t * 1.1) * 0.26;
+          } else {
+            wa.headPivot.rotation.x = (moving ? Math.sin(trotPhase * 2) * 0.08 : Math.sin(t * 1.4) * 0.08);
+            wa.headPivot.rotation.y = Math.sin(t * (wa.kind === 'wolf' ? 1.8 : 0.9)) * (moving ? 0.20 : 0.44);
+          }
+        }
+        if (wa.ears && wa.ears.length) {
+          const ew = Math.sin(t * 5.2) * 0.10;
+          wa.ears.forEach((em, ei) => { em.rotation.z = (ei === 0 ? 0.35 : -0.35) + (ei === 0 ? ew : -ew); });
+        }
+        if (wa.tailPivot) {
+          wa.tailPivot.rotation.y = Math.sin(t * (wa.kind === 'wolf' ? 5.2 : 3.4)) * 0.36;
+          wa.tailPivot.rotation.x = -0.35 + Math.cos(t * 2.6) * 0.10;
+        }
+      }
+    }
+
     // Animate beacon rings, bots, pets & crowd InstancedMesh
     if (LW_STATE.group3D) {
       LW_STATE.group3D.children.forEach(c => {
@@ -421,6 +847,7 @@
       return false;
     }
     if (k === 'i') { window.lwOpenPanel('hub'); return true; }
+    if (k === 'v') { if (typeof window.lwToggleActionsDrawer === 'function') window.lwToggleActionsDrawer(); return true; }
     if (k === 'b') { window.lwToggleBuildMode(); return true; }
     if (k === 'j') { triggerJump(); return true; }
     if (k === 'g') {
@@ -456,7 +883,14 @@
       lwPing(kinds[LW_STATE.pingIdx]);
       return true;
     }
-    if (k === 'f') { lwAction('emote', { emote: e.shiftKey ? 'highfive' : 'wave' }); return true; }
+    if (k === 'f') {
+      if (LW_STATE.mountedDragon && window.__dragonCtrl && window.__dragonCtrl.breatheFire) {
+        window.__dragonCtrl.breatheFire(2.6);
+      } else {
+        lwRunCharAction(e.shiftKey ? 'highfive' : 'wave');
+      }
+      return true;
+    }
     return false;
   };
 
@@ -664,6 +1098,7 @@
     const mountRecipes = cli.mount_recipes || {};
     LW_STATE.activeMountMeshes = {};
     Object.entries(lw.mounts || {}).forEach(([pidKey, mData]) => {
+      if (mData && mData.key === 'ash_drake' && window.__dragonCtrl && window.__dragonCtrl.getState && window.__dragonCtrl.getState()) return;
       const pObj = (scene3d.players || []).find(p => p.id === pidKey);
       if (!pObj) return;
       const mRec = mountRecipes[mData.key] || mountRecipes.sand_skink;
@@ -764,6 +1199,7 @@
       }
       root.add(cg);
     });
+    LW_STATE.wildlifeAnim = [];
     (lw.wildlife || []).forEach((wf, wIdx) => {
       if (wf.ridden_by) return;
       const wx = _worldX(wf.x), wz = _worldZ(wf.y), gy = _groundY(wx, wz);
@@ -776,56 +1212,81 @@
       const col = wf.kind === 'peddler' ? pedCols[wHash % pedCols.length] : (wf.kind === 'wolf' ? wolfCols[wHash % wolfCols.length] : deerCols[wHash % deerCols.length]);
       const wGrp = new THREE.Group();
       const bodyMat = _mkMat({ color: col, pbrKind: 'fur', roughness: 0.78 + (wHash % 4) * 0.03, sheen: 0.68 + (wHash % 3) * 0.06, vertexColors: true });
-      const torsoRaw = (_scL && _scL.lathe) ? _scL.lathe([[1.6, -6.5], [3.6, -3.5], [3.4, 1.5], [4.0, 4.5], [1.8, 6.8]], 10) : new THREE.CylinderGeometry(3.6, 3.8, 12, 8);
+      const torsoRaw = (_scL && _scL.lathe) ? _scL.lathe([[1.4, -6.6], [3.5, -3.5], [3.3, 1.5], [3.9, 4.5], [1.6, 6.8]], 14) : new THREE.CylinderGeometry(3.5, 3.7, 12, 14);
       const torsoGeo = _tintGeoY(torsoRaw, [0.78, 0.74, 0.70], [1.06, 1.04, 0.98]);
       const torso = new THREE.Mesh(torsoGeo, bodyMat);
       torso.scale.set(0.78, 1.0, 1.05); torso.rotation.x = Math.PI / 2; torso.position.y = 7.4; torso.castShadow = true;
-      const neck = new THREE.Mesh(_tintGeoY(new THREE.CylinderGeometry(1.5, 2.6, 6.2, 8), [0.85, 0.82, 0.78], [1.05, 1.03, 0.98]), bodyMat);
-      neck.position.set(0, 9.6, 4.8); neck.rotation.x = 0.65; neck.castShadow = true;
-      const cranium = new THREE.Mesh(_tintGeoY(new THREE.DodecahedronGeometry(2.0, 1), [0.88, 0.84, 0.80], [1.08, 1.05, 1.0]), bodyMat);
-      cranium.scale.set(0.85, 0.82, 1.15); cranium.position.set(0, 12.2, 7.0); cranium.castShadow = true;
-      const snout = new THREE.Mesh(_tintGeoY(new THREE.CylinderGeometry(0.65, 1.25, 2.8, 7), [0.68, 0.62, 0.58], [0.95, 0.90, 0.86]), bodyMat);
-      snout.rotation.x = Math.PI * 0.55; snout.position.set(0, 11.7, 9.0); snout.castShadow = true;
-      const earGeo = _tintGeoY(new THREE.ConeGeometry(0.48, 2.0, 4), [0.82, 0.76, 0.72], [0.58, 0.50, 0.46]);
-      [-0.95, 0.95].forEach(ex => {
+      wGrp.add(torso);
+
+      // Articulated Head/Neck Pivot at shoulders (0, 8.8, 4.4)
+      const headPivot = new THREE.Group();
+      headPivot.position.set(0, 8.8, 4.4);
+      const neck = new THREE.Mesh(_tintGeoY(new THREE.CylinderGeometry(1.45, 2.5, 6.0, 12), [0.85, 0.82, 0.78], [1.05, 1.03, 0.98]), bodyMat);
+      neck.position.set(0, 1.2, 0.9); neck.rotation.x = 0.62; neck.castShadow = true;
+      const cranium = new THREE.Mesh(_tintGeoY(new THREE.SphereGeometry(1.95, 12, 9), [0.88, 0.84, 0.80], [1.08, 1.05, 1.0]), bodyMat);
+      cranium.scale.set(0.84, 0.84, 1.18); cranium.position.set(0, 3.4, 2.8); cranium.castShadow = true;
+      const snout = new THREE.Mesh(_tintGeoY(new THREE.CylinderGeometry(0.62, 1.22, 2.8, 10), [0.68, 0.62, 0.58], [0.95, 0.90, 0.86]), bodyMat);
+      snout.rotation.x = Math.PI * 0.54; snout.position.set(0, 2.9, 4.8); snout.castShadow = true;
+      const noseTip = new THREE.Mesh(new THREE.SphereGeometry(0.42, 8, 6), _mkMat({ color: 0x221c18, roughness: 0.35 }));
+      noseTip.position.set(0, 2.85, 6.2);
+      const earGeo = _tintGeoY(new THREE.SphereGeometry(0.55, 8, 6).scale(0.55, 1.95, 0.38), [0.82, 0.76, 0.72], [0.58, 0.50, 0.46]);
+      const ears = [-0.95, 0.95].map(ex => {
         const ear = new THREE.Mesh(earGeo, bodyMat);
-        ear.position.set(ex, 13.5, 5.8); ear.rotation.set(-0.2, 0, ex < 0 ? 0.35 : -0.35); wGrp.add(ear);
+        ear.position.set(ex, 4.8, 1.8); ear.rotation.set(-0.22, 0, ex < 0 ? 0.35 : -0.35); headPivot.add(ear);
+        return ear;
       });
+      headPivot.add(neck, cranium, snout, noseTip);
+
+      // Articulated Tail Pivot at rump (0, 7.6, -6.0)
+      const tailPivot = new THREE.Group();
+      tailPivot.position.set(0, 7.6, -6.0);
       if (wf.kind === 'peddler') {
         const blanketMat = _mkMat({ color: 0x823428, pbrKind: 'cloth', roughness: 0.86, sheen: 0.74, vertexColors: true });
-        const blanket = new THREE.Mesh(_tintGeoY(new THREE.BoxGeometry(6.8, 2.2, 6.4), [0.76, 0.72, 0.72], [1.04, 1.0, 0.98]), blanketMat);
-        blanket.position.set(0, 9.9, -0.4); blanket.castShadow = true;
+        const blanket = new THREE.Mesh(_tintGeoY(new THREE.CylinderGeometry(3.6, 3.8, 6.2, 12, 1, false, -Math.PI * 0.55, Math.PI * 1.10).rotateX(Math.PI * 0.5), [0.76, 0.72, 0.72], [1.04, 1.0, 0.98]), blanketMat);
+        blanket.scale.set(1.02, 0.65, 1.0); blanket.position.set(0, 8.2, -0.4); blanket.castShadow = true;
         const goldTrimMat = _mkMat({ color: 0xd4a448, pbrKind: 'metal', roughness: 0.36, metalness: 0.78 });
-        const trimBand = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.45, 6.7), goldTrimMat);
-        trimBand.position.set(0, 9.05, -0.4);
-        const bag = new THREE.Mesh(_tintGeoY(new THREE.BoxGeometry(8.2, 3.6, 5.2), [0.74, 0.70, 0.68], [1.02, 0.98, 0.94]), _mkMat({ color: 0x624024, pbrKind: 'leather', roughness: 0.68, vertexColors: true }));
-        bag.position.set(0, 8.8, -0.6); bag.castShadow = true;
-        [-4.25, 4.25].forEach(bx => {
-          const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.1, 1.2), goldTrimMat);
-          buckle.position.set(bx, 9.4, -0.6);
-          wGrp.add(buckle);
-        });
-        wGrp.add(blanket, trimBand, bag);
+        const bag = new THREE.Mesh(_tintGeoY(new THREE.CylinderGeometry(2.1, 2.3, 5.2, 10).rotateX(Math.PI * 0.5), [0.74, 0.70, 0.68], [1.02, 0.98, 0.94]), _mkMat({ color: 0x624024, pbrKind: 'leather', roughness: 0.68, vertexColors: true }));
+        const bagL = bag, bagR = bag.clone();
+        bagL.position.set(-3.8, 7.8, -0.6); bagR.position.set(3.8, 7.8, -0.6);
+        wGrp.add(blanket, bagL, bagR);
+        const tailM = new THREE.Mesh(_tintGeoY(new THREE.CylinderGeometry(0.32, 0.16, 4.8, 8).translate(0, -2.4, 0), [0.46, 0.42, 0.38], [0.95, 0.90, 0.86]), bodyMat);
+        tailPivot.add(tailM);
       } else {
-        const tail = new THREE.Mesh(_tintGeoY(new THREE.ConeGeometry(0.95, 5.5, 6), [0.72, 0.68, 0.64], [1.06, 1.04, 1.0]), bodyMat);
-        tail.position.set(0, 7.8, -7.8); tail.rotation.x = -0.95; wGrp.add(tail);
-        if (wf.kind !== 'wolf') {
+        const tailM = new THREE.Mesh(_tintGeoY(new THREE.SphereGeometry(0.95, 10, 8).scale(0.85, 0.85, 2.85).translate(0, 0, -2.4), [0.74, 0.70, 0.66], [1.06, 1.04, 1.0]), bodyMat);
+        tailPivot.add(tailM);
+        if (wf.kind === 'deer') {
           const antMat = _mkMat({ color: 0xc2b092, pbrKind: 'wood', roughness: 0.62 });
-          [-0.8, 0.8].forEach(ax => {
-            const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.32, 3.8, 5), antMat);
-            ant.position.set(ax * 1.4, 14.5, 6.2); ant.rotation.set(-0.25, 0, ax < 0 ? 0.45 : -0.45); wGrp.add(ant);
+          [-0.78, 0.78].forEach(ax => {
+            const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.28, 3.8, 8), antMat);
+            beam.position.set(ax * 1.4, 5.6, 2.0); beam.rotation.set(-0.28, 0, ax < 0 ? 0.42 : -0.42);
+            const tine = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.16, 1.9, 6), antMat);
+            tine.position.set(ax * 1.9, 6.2, 2.6); tine.rotation.set(0.45, 0, ax < 0 ? 0.25 : -0.25);
+            headPivot.add(beam, tine);
           });
         }
       }
-      const legGeo = _tintGeoY(new THREE.CylinderGeometry(0.95, 0.48, 6.8, 6), [0.46, 0.42, 0.38], [1.0, 0.98, 0.95]);
-      [[-1.8, 3.8], [1.8, 3.8], [-1.8, -3.8], [1.8, -3.8]].forEach(([lx, lz]) => {
-        const lm = new THREE.Mesh(legGeo, bodyMat);
-        lm.position.set(lx, 3.4, lz); lm.castShadow = true; wGrp.add(lm);
+      wGrp.add(headPivot, tailPivot);
+
+      // Articulated 4 Leg Pivots at shoulder/hip height (y = 6.8)
+      const legGeo = _tintGeoY(new THREE.CylinderGeometry(0.88, 0.44, 6.8, 10).translate(0, -3.4, 0), [0.46, 0.42, 0.38], [1.0, 0.98, 0.95]);
+      const hoofGeo = new THREE.CylinderGeometry(0.48, 0.54, 0.75, 8).translate(0, -6.45, 0);
+      const hoofMat = _mkMat({ color: 0x2a2420, roughness: 0.65 });
+      const legs = [[-1.85, 3.8], [1.85, 3.8], [-1.85, -3.8], [1.85, -3.8]].map(([lx, lz]) => {
+        const lp = new THREE.Group(); lp.position.set(lx, 6.8, lz);
+        const lm = new THREE.Mesh(legGeo, bodyMat); lm.castShadow = true;
+        const hm = new THREE.Mesh(hoofGeo, hoofMat);
+        lp.add(lm, hm); wGrp.add(lp);
+        return lp;
       });
-      wGrp.add(torso, neck, cranium, snout);
       const wScale = 0.84 + ((wHash >> 3) % 35) * 0.01;
       wGrp.scale.set(wScale, wScale, wScale);
       wGrp.position.set(wx, gy, wz);
+      LW_STATE.wildlifeAnim.push({
+        grp: wGrp, headPivot, tailPivot, legs, ears, kind: wf.kind,
+        homeX: wx, homeZ: wz, curX: wx, curZ: wz, offX: 0, offZ: 0,
+        yaw: (wHash % 628) * 0.01, phase: (wHash % 100) * 0.1,
+        roamR: wf.kind === 'wolf' ? 38 : (wf.kind === 'peddler' ? 18 : 26),
+      });
       if (wf.kind === 'peddler') {
         wGrp.userData.mountKey = 'traveling_peddler';
         wGrp.userData.mountCommand = 'peddler';
@@ -905,18 +1366,19 @@
       }
     });
 
-    // J. Tier 5 & 7 Crowd Audio & InstancedMesh Endless Crowds
-    const crowd = lw.crowd || { enabled: true, density: 28 };
+    // J. Tier 5 & 7 Crowd Audio & InstancedMesh Crowds (capped at max 5 character-sized townspeople)
+    const crowd = lw.crowd || { enabled: true, density: 5 };
     const isOut = !(scene3d.time_weather && scene3d.time_weather.is_outdoor === false);
-    if (typeof sfx !== 'undefined' && sfx.setCrowdPresence) sfx.setCrowdPresence(crowd.enabled ? crowd.density : 0, !isOut);
-    rebuildCrowdMesh(root, crowd.density || 28, W, H, rid);
+    const crowdCnt = crowd.enabled === false ? 0 : Math.min(5, Math.max(0, Number(crowd.density || 5)));
+    if (typeof sfx !== 'undefined' && sfx.setCrowdPresence) sfx.setCrowdPresence(crowdCnt, !isOut);
+    rebuildCrowdMesh(root, crowdCnt, W, H, rid);
 
     // K. Speech Bubbles overlay in Log/Toast + Floating DOM HUD Banner for Event / Rested / Curse / Outpost
     updateLivingStatusStrip(lw);
   }
 
   function rebuildCrowdMesh(root, density, W, H, rid) {
-    const cnt = Math.min(72, Math.max(0, Number(density || 0)));
+    const cnt = Math.min(5, Math.max(0, Number(density || 0)));
     if (!cnt) { LW_STATE.crowdMesh = null; LW_STATE.crowdMeshes = null; return; }
     if (LW_STATE.crowdMeshes && LW_STATE.lastCrowdRoom === rid && LW_STATE.crowdAgents.length === cnt) {
       LW_STATE.crowdMeshes.forEach(m => { if (m) root.add(m); });
@@ -935,46 +1397,59 @@
       return geo;
     };
     const _sc = window._sculptHelpers || {};
-    const _mkArms = (w = 0.75) => {
-      const aL = _paintPart(new THREE.CylinderGeometry(w, w * 0.8, 5.8, 6), 0.90, 0.88, 0.86, 0.82); aL.rotateX(-0.18); aL.rotateZ(0.14); aL.translate(-3.1, 9.8, 0.3);
-      const aR = _paintPart(new THREE.CylinderGeometry(w, w * 0.8, 5.8, 6), 0.90, 0.88, 0.86, 0.82); aR.rotateX(0.18); aR.rotateZ(-0.14); aR.translate(3.1, 9.8, -0.3);
-      return [aL, aR];
+    const _mkArms = (w = 0.78) => {
+      const shL = _paintPart(new THREE.SphereGeometry(w * 1.18, 10, 8), 0.94, 0.92, 0.90, 0.86); shL.translate(-2.55, 12.1, 0);
+      const shR = _paintPart(new THREE.SphereGeometry(w * 1.18, 10, 8), 0.94, 0.92, 0.90, 0.86); shR.translate(2.55, 12.1, 0);
+      const aL = _paintPart(new THREE.CylinderGeometry(w, w * 0.82, 5.8, 12), 0.92, 0.90, 0.88, 0.84); aL.rotateX(-0.16); aL.rotateZ(0.08); aL.translate(-2.72, 9.6, 0.35);
+      const aR = _paintPart(new THREE.CylinderGeometry(w, w * 0.82, 5.8, 12), 0.92, 0.90, 0.88, 0.84); aR.rotateX(0.16); aR.rotateZ(-0.08); aR.translate(2.72, 9.6, -0.35);
+      return [shL, shR, aL, aR];
     };
-    // Cohort 0: Cloaked Townsfolk / Scholars (cloth PBR + wide-brimmed hat)
-    const c0Geo = _g('lw_crowd_c0_v6', () => {
-      const torso = _paintPart(new THREE.CylinderGeometry(2.5, 2.1, 6.6, 8), 0.96, 0.94, 0.92, 0.80); torso.scale(1.12, 1.0, 0.68); torso.translate(0, 10.0, 0);
-      const cloak = _paintPart(new THREE.CylinderGeometry(2.3, 3.6, 8.2, 7, 1, false, Math.PI * 0.65, Math.PI * 0.70), 0.64, 0.60, 0.68, 0.74); cloak.rotateX(0.12); cloak.translate(0, 8.6, -0.6);
-      const brim = _paintPart(new THREE.CylinderGeometry(3.0, 3.3, 0.6, 8), 0.48, 0.44, 0.42, 0.85); brim.translate(0, 16.2, 0);
-      const crown = _paintPart(new THREE.ConeGeometry(1.7, 2.4, 8), 0.56, 0.50, 0.48, 0.80); crown.translate(0, 17.5, -0.1);
+    // Cohort 0: Cloaked Townsfolk / Scholars (smooth 14-seg torso/cloak & felt hat)
+    const c0Geo = _g('lw_crowd_c0_v9', () => {
+      const torso = _paintPart(new THREE.CylinderGeometry(2.5, 2.1, 6.6, 14), 0.96, 0.94, 0.92, 0.80); torso.scale(1.12, 1.0, 0.68); torso.translate(0, 10.0, 0);
+      const cloak = _paintPart(new THREE.CylinderGeometry(2.3, 3.6, 8.2, 12, 1, false, Math.PI * 0.65, Math.PI * 0.70), 0.64, 0.60, 0.68, 0.74); cloak.rotateX(0.12); cloak.translate(0, 8.6, -0.6);
+      const brim = _paintPart(new THREE.CylinderGeometry(3.0, 3.2, 0.55, 16), 0.48, 0.44, 0.42, 0.85); brim.translate(0, 16.2, 0);
+      const crown = _paintPart(new THREE.CylinderGeometry(1.15, 1.75, 2.2, 14), 0.56, 0.50, 0.48, 0.80); crown.translate(0, 17.4, -0.05);
       const parts = [torso, cloak, ..._mkArms(0.75), brim, crown];
       return _sc.merge ? _sc.merge(parts) : parts[0];
     });
-    // Cohort 1: Armored Watchmen / Veterans (brushed metal PBR + pauldrons + kettle helm)
-    const c1Geo = _g('lw_crowd_c1_v6', () => {
-      const chest = _paintPart(new THREE.CylinderGeometry(2.8, 2.3, 6.8, 8), 0.96, 0.96, 0.98, 0.82); chest.scale(1.20, 1.0, 0.74); chest.translate(0, 10.1, 0);
-      const pL = _paintPart(new THREE.SphereGeometry(1.35, 8, 6), 0.86, 0.88, 0.92, 0.78); pL.scale(1.15, 0.75, 0.95); pL.translate(-3.3, 12.6, 0);
-      const pR = _paintPart(new THREE.SphereGeometry(1.35, 8, 6), 0.86, 0.88, 0.92, 0.78); pR.scale(1.15, 0.75, 0.95); pR.translate(3.3, 12.6, 0);
-      const helm = _paintPart(new THREE.SphereGeometry(1.92, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.58), 0.90, 0.92, 0.96, 0.82); helm.translate(0, 15.2, 0);
-      const helmRim = _paintPart(new THREE.CylinderGeometry(2.25, 2.45, 0.45, 10), 0.78, 0.80, 0.84, 0.85); helmRim.translate(0, 15.6, 0);
+    // Cohort 1: Armored Watchmen / Veterans (smooth pauldrons & helm)
+    const c1Geo = _g('lw_crowd_c1_v9', () => {
+      const chest = _paintPart(new THREE.CylinderGeometry(2.8, 2.3, 6.8, 14), 0.96, 0.96, 0.98, 0.82); chest.scale(1.20, 1.0, 0.74); chest.translate(0, 10.1, 0);
+      const pL = _paintPart(new THREE.SphereGeometry(1.35, 12, 8), 0.86, 0.88, 0.92, 0.78); pL.scale(1.15, 0.75, 0.95); pL.translate(-3.3, 12.6, 0);
+      const pR = _paintPart(new THREE.SphereGeometry(1.35, 12, 8), 0.86, 0.88, 0.92, 0.78); pR.scale(1.15, 0.75, 0.95); pR.translate(3.3, 12.6, 0);
+      const helm = _paintPart(new THREE.SphereGeometry(1.92, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.58), 0.90, 0.92, 0.96, 0.82); helm.translate(0, 15.2, 0);
+      const helmRim = _paintPart(new THREE.CylinderGeometry(2.25, 2.45, 0.45, 14), 0.78, 0.80, 0.84, 0.85); helmRim.translate(0, 15.6, 0);
       const parts = [chest, pL, pR, ..._mkArms(0.84), helm, helmRim];
       return _sc.merge ? _sc.merge(parts) : parts[0];
     });
-    // Cohort 2: Caravan Couriers / Artisans (leather PBR + travel pack + peaked hood)
-    const c2Geo = _g('lw_crowd_c2_v6', () => {
-      const vest = _paintPart(new THREE.CylinderGeometry(2.45, 2.15, 6.5, 8), 0.94, 0.90, 0.86, 0.80); vest.scale(1.10, 1.0, 0.70); vest.translate(0, 10.0, 0);
-      const pack = _paintPart(new THREE.BoxGeometry(3.8, 4.4, 2.4), 0.66, 0.58, 0.50, 0.76); pack.translate(0, 10.6, -2.1);
-      const hood = _paintPart(new THREE.ConeGeometry(1.85, 2.6, 7), 0.78, 0.72, 0.68, 0.78); hood.rotateX(-0.22); hood.translate(0, 16.5, -0.35);
+    // Cohort 2: Caravan Couriers / Artisans (smooth pack & hood)
+    const c2Geo = _g('lw_crowd_c2_v9', () => {
+      const vest = _paintPart(new THREE.CylinderGeometry(2.45, 2.15, 6.5, 14), 0.94, 0.90, 0.86, 0.80); vest.scale(1.10, 1.0, 0.70); vest.translate(0, 10.0, 0);
+      const pack = _paintPart(new THREE.CylinderGeometry(1.8, 1.9, 4.2, 12), 0.66, 0.58, 0.50, 0.76); pack.scale(1.1, 1.0, 0.72); pack.translate(0, 10.6, -2.1);
+      const hood = _paintPart(new THREE.SphereGeometry(1.88, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.65), 0.78, 0.72, 0.68, 0.78); hood.rotateX(-0.22); hood.translate(0, 15.4, -0.2);
       const parts = [vest, pack, ..._mkArms(0.72), hood];
       return _sc.merge ? _sc.merge(parts) : parts[0];
     });
-    const headGeo = _g('lw_crowd_head_v6', () => {
-      const h = new THREE.SphereGeometry(1.72, 8, 6); h.scale(0.92, 1.08, 0.98); h.translate(0, 15.0, 0);
-      return _paintPart(h, 1.0, 1.0, 1.0, 0.86);
+    const headGeo = _g('lw_crowd_head_v9', () => {
+      const h = _paintPart(new THREE.SphereGeometry(1.74, 12, 10), 1.0, 1.0, 1.0, 0.86);
+      h.scale(0.92, 1.08, 0.98); h.translate(0, 15.0, 0);
+      const _mkCrowdHand = (hx, hy, hz, side) => {
+        const palm = _paintPart(new THREE.SphereGeometry(0.45, 8, 6).scale(0.75, 1.15, 0.95), 0.96, 0.94, 0.92, 0.84);
+        palm.translate(hx, hy, hz);
+        const fingers = _paintPart(new THREE.CylinderGeometry(0.28, 0.20, 0.70, 8), 0.92, 0.88, 0.86, 0.80);
+        fingers.rotateZ(-side * 0.55); fingers.translate(hx - side * 0.16, hy - 0.60, hz);
+        const thumb = _paintPart(new THREE.CylinderGeometry(0.15, 0.12, 0.50, 6), 0.94, 0.90, 0.88, 0.82);
+        thumb.rotateX(0.45); thumb.rotateZ(-side * 0.45); thumb.translate(hx - side * 0.18, hy - 0.22, hz + 0.40);
+        return [palm, fingers, thumb];
+      };
+      const parts = [h, ..._mkCrowdHand(-2.55, 6.72, 0.80, -1), ..._mkCrowdHand(2.55, 6.72, -0.80, 1)];
+      return _sc.merge ? _sc.merge(parts) : h;
     });
-    const bootGeo = _g('lw_crowd_boots_v6', () => {
-      const legL = _paintPart(new THREE.CylinderGeometry(1.05, 0.82, 7.2, 6), 0.94, 0.90, 0.86, 0.72); legL.rotateX(0.16); legL.translate(-1.35, 3.6, 0.5);
-      const legR = _paintPart(new THREE.CylinderGeometry(1.05, 0.82, 7.2, 6), 0.94, 0.90, 0.86, 0.72); legR.rotateX(-0.16); legR.translate(1.35, 3.6, -0.5);
-      const belt = _paintPart(new THREE.CylinderGeometry(2.58, 2.52, 1.35, 8), 0.72, 0.64, 0.58, 0.85); belt.scale(1.16, 1.0, 0.74); belt.translate(0, 7.4, 0);
+    const bootGeo = _g('lw_crowd_boots_v8', () => {
+      const legL = _paintPart(new THREE.CylinderGeometry(1.05, 0.80, 7.2, 12), 0.94, 0.90, 0.86, 0.72); legL.rotateX(0.16); legL.translate(-1.35, 3.6, 0.5);
+      const legR = _paintPart(new THREE.CylinderGeometry(1.05, 0.80, 7.2, 12), 0.94, 0.90, 0.86, 0.72); legR.rotateX(-0.16); legR.translate(1.35, 3.6, -0.5);
+      const belt = _paintPart(new THREE.CylinderGeometry(2.58, 2.52, 1.35, 14), 0.72, 0.64, 0.58, 0.85); belt.scale(1.16, 1.0, 0.74); belt.translate(0, 7.4, 0);
       const parts = [legL, legR, belt];
       return _sc.merge ? _sc.merge(parts) : parts[0];
     });
@@ -992,9 +1467,9 @@
     const bootMat = _mkMat({ color: 0xd8cfc6, pbrKind: 'leather', roughness: 0.74, vertexColors: true });
 
     const palettes = [
-      [0x8c4a3e, 0x3f6488, 0x4f7848, 0x987038, 0x6c4c7c, 0x3e7272, 0x8a5864, 0x766c44],
-      [0xc2cad4, 0x7a828c, 0xc89a4c, 0x5c7ca4, 0x9c4842, 0xb8c0c8],
-      [0x965c38, 0x764c32, 0x687848, 0xa88456, 0x564e48, 0x86423a],
+      [0xc44536, 0x3b82f6, 0x2ea043, 0xd99b26, 0x8b5cf6, 0x06b6d4, 0xec4899, 0x84a93c],
+      [0xd8e2ec, 0x6c88a8, 0xe8b43c, 0x4f7ca8, 0xc94a42, 0x94b0b8],
+      [0xc86438, 0x3f886c, 0x9c5cb8, 0xd4a448, 0x3a7ca5, 0xb8485c],
     ];
     const skinPalette = [0xeec09c, 0xd8a278, 0xbf865a, 0x8c5a3c, 0x6a422c, 0xe4bca2];
     const bootPalette = [0x443326, 0x6a442c, 0x383f48, 0x5a302c, 0x564c3e, 0x424d3e];
@@ -1012,20 +1487,19 @@
       const subIdx = buckets[coh].length;
       buckets[coh].push(i);
       if (rebuildAgents) {
-        const tierR = (h >> 9) % 100;
-        const isYouth = (coh !== 1) && (tierR < 16);
-        const sy = isYouth ? (0.68 + ((h >> 14) % 13) * 0.01) : (coh === 1 ? (0.96 + ((h >> 14) % 23) * 0.01) : (0.88 + ((h >> 14) % 31) * 0.01));
-        const sx = isYouth ? (0.72 + ((h >> 19) % 11) * 0.01) : (coh === 1 ? (0.96 + ((h >> 19) % 22) * 0.01) : (0.86 + ((h >> 19) % 28) * 0.01));
+        // Ballpark hero character scale (~30-33u height instead of miniature figures)
+        const sy = 1.76 + ((h >> 14) % 18) * 0.01;
+        const sx = 1.70 + ((h >> 19) % 18) * 0.01;
         LW_STATE.crowdAgents.push({
           angle: (i / cnt) * Math.PI * 2 + (h % 7) * 0.08,
-          rad: 235 + ((h >> 3) % 7) * 58,
-          speed: (0.032 + ((h >> 6) % 7) * 0.012) * (i % 2 === 0 ? 1 : -1) * (isYouth ? 1.15 : 1.0),
-          ox: (Math.sin(i * 7.3 + (seedBase % 11)) * 0.25) * W,
-          oz: (Math.cos(i * 4.1 + (seedBase % 13)) * 0.25) * H,
+          rad: 185 + ((h >> 3) % 5) * 48,
+          speed: (0.030 + ((h >> 6) % 6) * 0.010) * (i % 2 === 0 ? 1 : -1),
+          ox: (Math.sin(i * 7.3 + (seedBase % 11)) * 0.22) * W,
+          oz: (Math.cos(i * 4.1 + (seedBase % 13)) * 0.22) * H,
           cohort: coh, subIdx, hash: h, sx, sy,
-          bobFreq: (0.0065 + ((h >> 22) % 7) * 0.0008) * (isYouth ? 1.18 : 1.0),
-          bobAmp: (0.95 + ((h >> 25) % 5) * 0.20) * sy,
-          swayAmp: 0.03 + ((h >> 27) % 4) * 0.02,
+          bobFreq: 0.0062 + ((h >> 22) % 6) * 0.0007,
+          bobAmp: (0.65 + ((h >> 25) % 4) * 0.14) * sy,
+          swayAmp: 0.025 + ((h >> 27) % 3) * 0.015,
         });
       } else {
         LW_STATE.crowdAgents[i].cohort = coh;
@@ -1040,6 +1514,7 @@
       const n = buckets[ci].length;
       const im = new THREE.InstancedMesh(cg, mats[ci], Math.max(1, n));
       im.count = n;
+      im.frustumCulled = false;
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       im.castShadow = true; im.receiveShadow = true;
       const pal = palettes[ci];
@@ -1055,6 +1530,7 @@
     const headInst = new THREE.InstancedMesh(headGeo, headMat, cnt);
     const bootInst = new THREE.InstancedMesh(bootGeo, bootMat, cnt);
     [headInst, bootInst].forEach((im, kindIdx) => {
+      im.frustumCulled = false;
       im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       im.castShadow = true; im.receiveShadow = true;
       const pal = kindIdx === 0 ? skinPalette : bootPalette;
@@ -1296,8 +1772,51 @@
     if (lw.narrative_harmony && lw.narrative_harmony.climax_prep_pct > 0) pills.push(`🧭 ${lw.narrative_harmony.guild_title}: +${lw.narrative_harmony.climax_prep_pct}% Prep | Goodwill +${lw.narrative_harmony.goodwill || 0}`);
     if ((lw.rivals || []).length) pills.push(`💀 Nemesis: ${lw.rivals[lw.rivals.length - 1].name}`);
     (lw.speech_bubbles || []).forEach(sb => pills.push(`💬 ${sb.name}: "${sb.text}"`));
-    strip.innerHTML = pills.map(txt => `<span style="background:rgba(13,17,23,0.84);border:1px solid #30363d;color:#e6edf3;padding:3px 8px;border-radius:12px;font-size:0.72rem;">${txt}</span>`).join('');
+    strip.innerHTML = `<button onclick="window.lwToggleActionsDrawer && window.lwToggleActionsDrawer()" style="pointer-events:auto;cursor:pointer;background:#1f6feb;border:1px solid #58a6ff;color:#fff;padding:3px 10px;border-radius:12px;font-size:0.74rem;font-weight:700;">🎭 Actions [V]</button>`
+      + pills.map(txt => `<span style="background:rgba(13,17,23,0.84);border:1px solid #30363d;color:#e6edf3;padding:3px 8px;border-radius:12px;font-size:0.72rem;">${txt}</span>`).join('');
   }
+
+  window.lwToggleActionsDrawer = function lwToggleActionsDrawer(forceOpen) {
+    let dr = document.getElementById('lwActionsDrawer');
+    const cat = (window.__DND_CLIENT_SKILLS__ && Array.isArray(window.__DND_CLIENT_SKILLS__.action_catalog))
+      ? window.__DND_CLIENT_SKILLS__.action_catalog : [];
+    if (!dr) {
+      dr = document.createElement('div');
+      dr.id = 'lwActionsDrawer';
+      dr.style.cssText = 'position:fixed;bottom:52px;left:14px;z-index:9960;width:min(760px,92vw);max-height:62vh;background:rgba(13,17,23,0.95);border:1.5px solid #58a6ff;border-radius:12px;display:none;flex-direction:column;overflow:hidden;color:#e6edf3;box-shadow:0 10px 32px rgba(0,0,0,0.65);';
+      dr.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;background:#161b22;border-bottom:1px solid #30363d;">
+        <b id="lwActDrawerTitle">🎭 Character Actions & Physics</b>
+        <input id="lwActSearch" placeholder="Search 108 actions (kneel, climb tree, dragon...) " style="flex:1;max-width:260px;background:#0d1117;color:#fff;border:1px solid #30363d;border-radius:6px;padding:4px 8px;font-size:0.78rem;"/>
+        <button class="btn" onclick="window.lwToggleActionsDrawer(false)">✕</button>
+      </div>
+      <div id="lwActCats" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;background:#11161f;border-bottom:1px solid #21262d;"></div>
+      <div id="lwActGrid" style="padding:10px 12px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;"></div>`;
+      document.body.appendChild(dr);
+      dr.querySelector('#lwActSearch').addEventListener('input', () => window._renderActionsDrawerGrid && window._renderActionsDrawerGrid());
+    }
+    const wantOpen = forceOpen !== undefined ? Boolean(forceOpen) : (dr.style.display !== 'flex');
+    dr.style.display = wantOpen ? 'flex' : 'none';
+    LW_STATE.actionsDrawerOpen = wantOpen;
+    if (!wantOpen) return;
+
+    const cats = ['All', ...Array.from(new Set(cat.map(a => a.category)))];
+    if (!LW_STATE.actDrawerCat) LW_STATE.actDrawerCat = 'All';
+    window._renderActionsDrawerGrid = () => {
+      const q = (document.getElementById('lwActSearch')?.value || '').trim().toLowerCase();
+      const catsDiv = document.getElementById('lwActCats');
+      const gridDiv = document.getElementById('lwActGrid');
+      const titleEl = document.getElementById('lwActDrawerTitle');
+      if (titleEl) titleEl.innerText = `🎭 ${cat.length} Character Actions & Physics`;
+      if (catsDiv) {
+        catsDiv.innerHTML = cats.map(c => `<button class="btn ${LW_STATE.actDrawerCat === c ? 'btn-accent' : ''}" style="font-size:0.72rem;padding:3px 8px;" onclick="window.__LW_STATE__.actDrawerCat='${c}';window._renderActionsDrawerGrid();">${c}</button>`).join('');
+      }
+      if (gridDiv) {
+        const list = cat.filter(a => (LW_STATE.actDrawerCat === 'All' || a.category === LW_STATE.actDrawerCat) && (!q || `${a.id} ${a.label} ${a.aliases} ${a.category}`.toLowerCase().includes(q)));
+        gridDiv.innerHTML = list.map(a => `<button class="btn" style="text-align:left;font-size:0.75rem;padding:6px 8px;" title="${a.category} • ${a.posture}" onclick="window.lwRunCharAction('${a.id}')">${a.icon} ${a.label}</button>`).join('');
+      }
+    };
+    window._renderActionsDrawerGrid();
+  };
 
   LW_STATE.panelOpen = false;
   LW_STATE.activeTab = 'craft';

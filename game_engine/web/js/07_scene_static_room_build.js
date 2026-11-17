@@ -96,7 +96,7 @@
       const colors = new Float32Array(vCount * 3);
       const halfSpan = terrainSize * 0.5;
       const step = terrainSize / terrainSegs;
-      const defR = isSnowBiome ? 0.38 : 0.22, defG = isSnowBiome ? 0.43 : 0.31, defB = isSnowBiome ? 0.47 : 0.18;
+      const defR = isSnowBiome ? 0.42 : 0.24, defG = isSnowBiome ? 0.50 : 0.39, defB = isSnowBiome ? 0.58 : 0.21;
 
       for (let iy = 0; iy < stride; iy++) {
         const vz = -halfSpan + iy * step;
@@ -122,24 +122,29 @@
           const distOut = Math.hypot(Math.max(0, Math.abs(vx) - halfW0), Math.max(0, Math.abs(vz) - halfH0));
           const road = getRoadMask(vx, vz);
           const centerMix = Math.max(0, 1.0 - distOut / 360.0);
-          let r = defR, g = defG, b = defB;
+          const biomePatch = Math.sin(vx * 0.0022 + phaseX) * Math.cos(vz * 0.0021 - phaseZ);
+          const microPatch = Math.sin(vx * 0.0075 - phaseZ) * Math.sin(vz * 0.0072 + phaseX);
+          let r = defR + (isSnowBiome ? biomePatch * 0.03 : biomePatch * 0.065 + microPatch * 0.025);
+          let g = defG + (isSnowBiome ? biomePatch * 0.04 : biomePatch * 0.045 - microPatch * 0.02);
+          let b = defB + (isSnowBiome ? biomePatch * 0.06 : -biomePatch * 0.025 + Math.max(0, microPatch) * 0.04);
           if (vy > snowLine + 160) {
-            r = 0.80; g = 0.84; b = 0.89;
+            r = 0.80; g = 0.86; b = 0.94;
           } else if (vy > snowLine) {
             const sMix = (vy - snowLine) / 160;
-            r = 0.40 + 0.40 * sMix; g = 0.40 + 0.44 * sMix; b = 0.42 + 0.47 * sMix;
+            r = 0.44 + 0.36 * sMix; g = 0.45 + 0.41 * sMix; b = 0.50 + 0.44 * sMix;
           } else if (vy > 155) {
-            r = 0.39; g = 0.39; b = 0.40;
+            r = 0.44; g = 0.42; b = 0.44;
           } else if (vy > 40) {
             const hMix = (vy - 40) / 115;
-            r = r + (0.34 - r) * hMix; g = g + (0.37 - g) * hMix; b = b + (0.25 - b) * hMix;
+            r = r + (0.40 - r) * hMix; g = g + (0.42 - g) * hMix; b = b + (0.28 - b) * hMix;
           }
           if (slope > 0.24) {
             const rockMix = Math.min(1.0, (slope - 0.24) * 1.45);
-            const strata = 0.92 + Math.sin(vy * 0.22) * 0.08;
-            r = r * (1 - rockMix) + 0.34 * strata * rockMix;
-            g = g * (1 - rockMix) + 0.34 * strata * rockMix;
-            b = b * (1 - rockMix) + 0.36 * strata * rockMix;
+            const strata = 0.90 + Math.sin(vy * 0.22 + vx * 0.004) * 0.12;
+            const ochre = Math.max(0, Math.sin(vy * 0.08 + phaseX)) * 0.12;
+            r = r * (1 - rockMix) + (0.37 + ochre) * strata * rockMix;
+            g = g * (1 - rockMix) + (0.34 + ochre * 0.5) * strata * rockMix;
+            b = b * (1 - rockMix) + (0.39 - ochre * 0.2) * strata * rockMix;
           }
           if (road > 0.15 && vy < 240) {
             const rm = road * 0.85;
@@ -168,6 +173,8 @@
         if (getRoadMask(tx, tz) > 0.25) continue;
         const ty = getHeight(tx, tz);
         if (ty > snowLine - 25) continue;
+        const treeSlope = Math.hypot(getHeight(tx + 18, tz) - getHeight(tx - 18, tz), getHeight(tx, tz + 18) - getHeight(tx, tz - 18)) / 36.0;
+        if (treeSlope > 0.24) continue;
 
         const sc = 0.85 + ((t * 41) % 100) / 90.0;
         const ca = Math.cos(ang) * sc, sa = Math.sin(ang) * sc;
@@ -232,7 +239,7 @@
     }
 
     // Builds seamless 16000x16000 Skyrim continental mountains, roads, tiered pine forests, watchtowers & standing stones
-    function buildSkyrimOpenWorld(staticGrp, data, W, H, theme, tw, stoneMat, woodMat, cachedProcTex, applyQualityFn) {
+    function buildSkyrimOpenWorld(staticGrp, data, W, H, theme, tw, stoneMat, woodMat, cachedProcTex, applyQualityFn, fStyle) {
       const seedNum = (data.room_id || 'world').split('').reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) % 100000, 17);
       const { isSnowBiome, isDenseForest } = (typeof classifyBiomeFromSkill === 'function')
         ? classifyBiomeFromSkill(data.room_id, theme)
@@ -311,19 +318,20 @@
             const rT = radius * (1.0 - frac * 0.42);
             const hT = height * (0.48 - frac * 0.08);
             const yOff = -height * 0.30 + frac * height * 0.56;
-            const c = new THREE.ConeGeometry(rT, hT, 14, 2).toNonIndexed();
+            const c = new THREE.ConeGeometry(rT, hT, 22, 3).toNonIndexed();
             const p = c.attributes.position;
             const cols = new Float32Array(p.count * 3);
             for (let i = 0; i < p.count; i++) {
               let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
               const ang = Math.atan2(z, x);
               const rNow = Math.hypot(x, z);
-              const bough = 1.0 + 0.24 * Math.cos(ang * 7 + t * 1.4);
-              const droop = (rNow / Math.max(0.1, rT)) * -4.2;
+              const radialFrac = rNow / Math.max(0.1, rT);
+              const bough = 1.0 + 0.11 * Math.cos(ang * 5 + t * 1.4) + 0.04 * Math.sin(ang * 9 - t);
+              const droop = -(radialFrac * radialFrac) * 4.5;
               x *= bough; z *= bough; y += droop + yOff;
               p.setXYZ(i, x, y, z);
               const ly = Math.max(0, Math.min(1, (y + height * 0.5) / height));
-              const sh = botShade + (topShade - botShade) * (ly * 0.75 + (rNow / Math.max(0.1, rT)) * 0.25);
+              const sh = botShade + (topShade - botShade) * (ly * 0.75 + radialFrac * 0.25);
               cols[i * 3] = sh; cols[i * 3 + 1] = sh * 1.04; cols[i * 3 + 2] = sh * 0.96;
             }
             c.setAttribute('color', new THREE.BufferAttribute(cols, 3));
@@ -343,18 +351,18 @@
           merged.setAttribute('color', new THREE.BufferAttribute(mcols, 3));
           return merged;
         };
-        const trunkGeo = _geo('pine_trunk', () => new THREE.CylinderGeometry(3.2, 6.2, 36, 8));
-        const lowCrownGeo = _geo('pine_low_v3', () => _mkPineTierGeo(25, 58, 3, 0.50, 1.08));
-        const topCrownGeo = _geo('pine_top_v3', () => _mkPineTierGeo(17, 50, 3, 0.68, 1.18));
-        const broadTrunkGeo = _geo('broad_trunk_v1', () => new THREE.CylinderGeometry(2.4, 5.2, 42, 8));
-        const broadCrownGeo = _geo('broad_crown_v1', () => {
+        const trunkGeo = _geo('pine_trunk_v4', () => new THREE.CylinderGeometry(3.0, 6.2, 36, 12));
+        const lowCrownGeo = _geo('pine_low_v4', () => _mkPineTierGeo(25, 58, 3, 0.50, 1.08));
+        const topCrownGeo = _geo('pine_top_v4', () => _mkPineTierGeo(17, 50, 3, 0.68, 1.18));
+        const broadTrunkGeo = _geo('broad_trunk_v2', () => new THREE.CylinderGeometry(2.4, 5.2, 42, 12));
+        const broadCrownGeo = _geo('broad_crown_v2', () => {
           const mergeFn = window._sculptHelpers && window._sculptHelpers.merge;
           const lobes = [[0, 6, 0, 22, 18], [-11, -1, 7, 15, 13], [11, 0, -6, 15, 13], [3, -2, 11, 13, 12]].map(([lx, ly, lz, rx, ry], li) => {
-            const ig = new THREE.IcosahedronGeometry(1.0, 1).toNonIndexed();
+            const ig = new THREE.IcosahedronGeometry(1.0, 2).toNonIndexed();
             const pa = ig.attributes.position, cols = new Float32Array(pa.count * 3);
             for (let vi = 0; vi < pa.count; vi++) {
               const vx = pa.getX(vi), vy = pa.getY(vi), vz = pa.getZ(vi);
-              const warp = 0.88 + 0.18 * Math.sin(vx * 3.8 + li) * Math.cos(vz * 4.1 - vy * 2.7);
+              const warp = 0.93 + 0.09 * Math.sin(vx * 3.1 + li) * Math.cos(vz * 3.3 - vy * 2.2);
               pa.setXYZ(vi, vx * rx * warp + lx, vy * ry * warp + ly, vz * rx * warp + lz);
               const shade = 0.56 + 0.56 * Math.max(0, Math.min(1, (vy + 1.0) * 0.5));
               cols[vi * 3] = shade; cols[vi * 3 + 1] = shade * 1.02; cols[vi * 3 + 2] = shade * 0.94;
@@ -386,10 +394,11 @@
         const broadCrownInst = new THREE.InstancedMesh(broadCrownGeo, broadCrownMat, coniferCap);
         const tierStride = treeTarget * 16;
         const _tDum = new THREE.Object3D(), _tMat = new THREE.Matrix4(), _tCol = new THREE.Color();
-        const _coniferCols = isSnowBiome ? [0x6e9288, 0x84a09a, 0x5e827a, 0x90aaa2, 0x6c8676] : [0x58825a, 0x6e9248, 0x4e7448, 0x7e9a54, 0x587a68, 0x668446];
-        const _broadCols = isSnowBiome ? [0x88a49e, 0xa2b6b0, 0x9c8e6c, 0x76948a] : [0x7e9c4a, 0xbe8e44, 0x9e5e3c, 0x648c4c, 0xc8a44e, 0x829460];
+        const _coniferCols = isSnowBiome ? [0x6e9890, 0x86a6a0, 0x56847c, 0x90b2a8, 0x628c7a] : [0x2e7d54, 0x429450, 0x266658, 0x629e44, 0x3b7684, 0x4c8842];
+        const _broadCols = isSnowBiome ? [0x82a8a0, 0x9eb8b2, 0xb89668, 0x72968c] : [0x78b242, 0xe09f3e, 0xc84b31, 0x529b58, 0xf0bc42, 0x8f5cb8, 0xd46a4e];
         const _barkCols = [0x8c7056, 0xa47a58, 0x746458, 0x96887a, 0x6a5444];
         const _birchBarkCols = [0xd6d0c4, 0xc4bcb0, 0x9e7458, 0xb2aa98];
+        const climbableTrees = [];
         let conIdx = 0, brdIdx = 0;
         for (let ti = 0; ti < placedTrees; ti++) {
           const h = ((ti * 2654435761 + seedNum * 97) >>> 0);
@@ -422,6 +431,9 @@
             _tCol.setHex(_barkCols[h % _barkCols.length]); trunkInst.setColorAt(conIdx, _tCol);
             _tCol.setHex(_coniferCols[(h >> 3) % _coniferCols.length]); lowInst.setColorAt(conIdx, _tCol);
             _tCol.offsetHSL(0.0, 0.02, 0.06); topInst.setColorAt(conIdx, _tCol);
+            if (Math.hypot(_tDum.position.x, _tDum.position.z) < 1600) {
+              climbableTrees.push({ x: _tDum.position.x, y: groundY, z: _tDum.position.z, topY: groundY + Math.max(46, Math.min(82, 58 * origSc * yStret)) });
+            }
             conIdx++;
           } else {
             _tMat.fromArray(treeMatrices, mOff);
@@ -444,9 +456,14 @@
             broadCrownInst.setMatrixAt(brdIdx, _tDum.matrix);
             _tCol.setHex(_birchBarkCols[h % _birchBarkCols.length]); broadTrunkInst.setColorAt(brdIdx, _tCol);
             _tCol.setHex(_broadCols[(h >> 5) % _broadCols.length]); broadCrownInst.setColorAt(brdIdx, _tCol);
+            if (Math.hypot(_tDum.position.x, _tDum.position.z) < 1600) {
+              climbableTrees.push({ x: _tDum.position.x, y: groundY, z: _tDum.position.z, topY: groundY + Math.max(42, Math.min(72, 48 * origSc * yStret)) });
+            }
             brdIdx++;
           }
         }
+        staticGrp.userData.climbableTrees = climbableTrees;
+        window.__climbableTrees = climbableTrees;
         [trunkInst, lowInst, topInst].forEach(im => {
           im.count = conIdx; im.instanceMatrix.needsUpdate = true;
           if (im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -458,19 +475,19 @@
           im.castShadow = false; im.userData.isScenery = true; staticGrp.add(im);
         });
 
-        const rockGeo = _geo('outcrop_rock_v2', () => {
-          const g = new THREE.DodecahedronGeometry(16, 1), pa = g.attributes.position;
+        const rockGeo = _geo('outcrop_rock_v4', () => {
+          const g = new THREE.IcosahedronGeometry(16, 2), pa = g.attributes.position;
           for (let v = 0; v < pa.count; v++) {
             const vx = pa.getX(v), vy = pa.getY(v), vz = pa.getZ(v);
-            const d = 1.0 + Math.sin(vx * 0.28 + vy * 0.22) * 0.14 + Math.cos(vz * 0.31) * 0.10;
-            pa.setXYZ(v, vx * d, vy * d, vz * d);
+            const d = 1.0 + Math.sin(vx * 0.19 + vy * 0.15) * 0.09 + Math.cos(vz * 0.21) * 0.07;
+            pa.setXYZ(v, vx * d, vy * d * 0.86, vz * d);
           }
           g.computeVertexNormals(); return g;
         });
         const _stMaps = (typeof window.getProceduralObjectMaps === 'function') ? window.getProceduralObjectMaps('stone') : null;
         const rockMat = _mat('outcrop_rock_v3', () => new THREE.MeshStandardMaterial({ color: 0xb4bac2, map: _stMaps ? _stMaps.map : null, normalMap: wildNormTex, roughnessMap: _stMaps ? _stMaps.roughnessMap : null, roughness: 0.88 }));
         const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
-        const _rockCols = [0x7e8690, 0x988a74, 0x626870, 0x76846c, 0x8a7266, 0x9ea2a6];
+        const _rockCols = [0x7d8ea3, 0xa89274, 0x6a7d68, 0x966e64, 0x768298, 0x9fa8a0];
         for (let ri = 0; ri < placedRocks; ri++) {
           const rh = ((ri * 2654435761 + seedNum * 53) >>> 0);
           _tMat.fromArray(rockMatrices, ri * 16);
@@ -487,6 +504,45 @@
         rockInst.userData.isScenery = true;
         staticGrp.add(rockInst);
 
+        // Terrain substrate check: plants & organic ground cover grow only on natural soil/dirt/compost,
+        // never on brick/cement/cobble plazas, wood planks, compacted roads, obstacles, boulders, or bare rock cliffs.
+        const hasHardRoomCenter = !(fStyle && fStyle.grass);
+        const obsList = (data && Array.isArray(data.obstacles)) ? data.obstacles : [];
+        const portalList = (data && Array.isArray(data.portals)) ? data.portals : [];
+        const _getRoadMaskLocal = (wx, wz) => {
+          const dNS = (Math.abs(wz) > (H * 0.5 + 40) * 0.7) ? Math.abs(wx - Math.sin(wz * 0.0014) * 140) : 9999;
+          const dEW = (Math.abs(wx) > (W * 0.5 + 40) * 0.7) ? Math.abs(wz - Math.cos(wx * 0.0014) * 140) : 9999;
+          const dRoad = dNS < dEW ? dNS : dEW;
+          return Math.max(0, 1.0 - Math.max(0, dRoad - 42) / 95);
+        };
+        const isHardTerrainAt = (wx, wz, yVal) => {
+          if (hasHardRoomCenter && Math.hypot(wx / (W * 0.5), wz / (H * 0.5)) < 0.98) return true;
+          if (fStyle && fStyle.road && Math.abs(wx) <= W * 0.5 && wz > -H * 0.22 && wz < H * 0.12) return true;
+          if (_getRoadMaskLocal(wx, wz) > 0.26) return true;
+          for (let oi = 0; oi < obsList.length; oi++) {
+            const r = obsList[oi].rect || obsList[oi];
+            if (!r || r.length < 4) continue;
+            const ox = (r[0] + r[2] * 0.5) - W * 0.5, oz = (r[1] + r[3] * 0.5) - H * 0.5;
+            if (Math.abs(wx - ox) <= r[2] * 0.5 + 14 && Math.abs(wz - oz) <= r[3] * 0.5 + 14) return true;
+          }
+          for (let pi = 0; pi < portalList.length; pi++) {
+            const r = portalList[pi].rect;
+            if (!r || r.length < 4) continue;
+            const px = (r[0] + r[2] * 0.5) - W * 0.5, pz = (r[1] + r[3] * 0.5) - H * 0.5;
+            if (Math.abs(wx - px) <= r[2] * 0.5 + 16 && Math.abs(wz - pz) <= r[3] * 0.5 + 16) return true;
+          }
+          for (let ri = 0; ri < placedRocks; ri++) {
+            const ro = ri * 16;
+            const dx = wx - rockMatrices[ro + 12], dz = wz - rockMatrices[ro + 14];
+            if (dx * dx + dz * dz < 420) return true;
+          }
+          if (yVal > 148) return true;
+          const sDx = Math.abs(getTerrainHeight(wx + 18, wz) - getTerrainHeight(wx - 18, wz));
+          const sDz = Math.abs(getTerrainHeight(wx, wz + 18) - getTerrainHeight(wx, wz - 18));
+          if (Math.hypot(sDx, sDz) / 36.0 > 0.22) return true;
+          return false;
+        };
+
         // Tier 4 #4 Three-Tier Micro-Clutter: Soft grass blade tufts & faceted pebbles around the clearing
         const grassGeo = _geo('clutter_grass_tuft_v4', () => (window._sculptHelpers && window._sculptHelpers.grassTuft) ? window._sculptHelpers.grassTuft(2.6, 8.2) : new THREE.ConeGeometry(1.4, 8.0, 4));
         const _grHasCol = Boolean(grassGeo.attributes && grassGeo.attributes.color);
@@ -495,38 +551,52 @@
           : new THREE.MeshStandardMaterial({ color: isSnowBiome ? 0xb4c6ce : 0xc6d0b8, vertexColors: _grHasCol, roughness: 0.86 }));
         const grassMax = 640;
         const grassInst = new THREE.InstancedMesh(grassGeo, grassMat, grassMax);
-        const pebbleGeo = _geo('clutter_pebble_v2', () => (window._sculptHelpers && window._sculptHelpers.rock) ? window._sculptHelpers.rock(2.6, 1.6, 2.4, 3) : new THREE.DodecahedronGeometry(2.6, 0));
+        const pebbleGeo = _geo('clutter_pebble_v4', () => {
+          const g = new THREE.IcosahedronGeometry(2.3, 2), pa = g.attributes.position;
+          for (let i = 0; i < pa.count; i++) {
+            const vx = pa.getX(i), vy = pa.getY(i), vz = pa.getZ(i);
+            const d = 1.0 + Math.sin(vx * 0.9 + vz * 0.7) * 0.08;
+            pa.setXYZ(i, vx * d, vy * 0.65 * d, vz * d);
+          }
+          g.computeVertexNormals(); return g;
+        });
         const pebbleMat = _mat('clutter_pebble_v3', () => new THREE.MeshStandardMaterial({ color: 0xb6bac2, map: _stMaps ? _stMaps.map : null, normalMap: wildNormTex, roughness: 0.90 }));
         const pebbleMax = 320;
         const pebbleInst = new THREE.InstancedMesh(pebbleGeo, pebbleMat, pebbleMax);
         const cdum = new THREE.Object3D();
         const _grassCols = isSnowBiome ? [0x6e8880, 0x829892, 0x8e8668, 0x627c74, 0x94a69c] : [0x58823c, 0x729842, 0x8e8648, 0x4a6e38, 0x6c8856, 0x7ca246];
         let gCount = 0, pCount = 0;
-        for (let ci = 0; ci < 960; ci++) {
+        for (let ci = 0; ci < grassMax * 4 && gCount < grassMax; ci++) {
           const ch = ((ci * 2654435761 + seedNum * 37) >>> 0);
           const ang = ((ci * 2.39996 + seedNum * 0.13) % (Math.PI * 2));
           const rad = 110 + ((ci * 173 + seedNum * 29) % 1450);
           const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
           const cy = getTerrainHeight(cx, cz);
-          if (ci < grassMax && gCount < grassMax) {
-            cdum.position.set(cx, cy + 3.0, cz);
-            cdum.rotation.set(Math.sin(ci * 1.9) * 0.18, ang, Math.cos(ci * 2.3) * 0.18);
-            const gs = 0.55 + ((ch % 100) * 0.01);
-            cdum.scale.set(gs * (0.95 + ((ch >> 7) % 35) * 0.01), gs * (0.78 + ((ch >> 13) % 45) * 0.01), gs * (0.95 + ((ch >> 19) % 35) * 0.01));
-            cdum.updateMatrix();
-            _tCol.setHex(_grassCols[((ci * 13 + seedNum) >>> 0) % _grassCols.length]);
-            grassInst.setColorAt(gCount, _tCol);
-            grassInst.setMatrixAt(gCount++, cdum.matrix);
-          } else if (pCount < pebbleMax) {
-            cdum.position.set(cx, cy + 0.65, cz);
-            cdum.rotation.set(ci * 0.6, ci * 1.3, ci * 0.4);
-            const ps = 0.40 + ((ch % 125) * 0.01);
-            cdum.scale.set(ps * (1.05 + ((ch >> 8) % 45) * 0.01), ps * (0.45 + ((ch >> 14) % 35) * 0.01), ps * (0.85 + ((ch >> 20) % 40) * 0.01));
-            cdum.updateMatrix();
-            _tCol.setHex(_rockCols[((ci * 11 + seedNum) >>> 0) % _rockCols.length]);
-            pebbleInst.setColorAt(pCount, _tCol);
-            pebbleInst.setMatrixAt(pCount++, cdum.matrix);
-          }
+          if (isHardTerrainAt(cx, cz, cy)) continue;
+          cdum.position.set(cx, cy + 3.0, cz);
+          cdum.rotation.set(Math.sin(ci * 1.9) * 0.18, ang, Math.cos(ci * 2.3) * 0.18);
+          const gs = 0.55 + ((ch % 100) * 0.01);
+          cdum.scale.set(gs * (0.95 + ((ch >> 7) % 35) * 0.01), gs * (0.78 + ((ch >> 13) % 45) * 0.01), gs * (0.95 + ((ch >> 19) % 35) * 0.01));
+          cdum.updateMatrix();
+          _tCol.setHex(_grassCols[((ci * 13 + seedNum) >>> 0) % _grassCols.length]);
+          grassInst.setColorAt(gCount, _tCol);
+          grassInst.setMatrixAt(gCount++, cdum.matrix);
+        }
+        for (let ci = grassMax; ci < grassMax + pebbleMax * 3 && pCount < pebbleMax; ci++) {
+          const ch = ((ci * 2654435761 + seedNum * 37) >>> 0);
+          const ang = ((ci * 2.39996 + seedNum * 0.13) % (Math.PI * 2));
+          const rad = 110 + ((ci * 173 + seedNum * 29) % 1450);
+          const cx = Math.cos(ang) * rad, cz = Math.sin(ang) * rad;
+          const cy = getTerrainHeight(cx, cz);
+          if (isHardTerrainAt(cx, cz, cy)) continue;
+          cdum.position.set(cx, cy + 0.65, cz);
+          cdum.rotation.set(ci * 0.6, ci * 1.3, ci * 0.4);
+          const ps = 0.40 + ((ch % 125) * 0.01);
+          cdum.scale.set(ps * (1.05 + ((ch >> 8) % 45) * 0.01), ps * (0.45 + ((ch >> 14) % 35) * 0.01), ps * (0.85 + ((ch >> 20) % 40) * 0.01));
+          cdum.updateMatrix();
+          _tCol.setHex(_rockCols[((ci * 11 + seedNum) >>> 0) % _rockCols.length]);
+          pebbleInst.setColorAt(pCount, _tCol);
+          pebbleInst.setMatrixAt(pCount++, cdum.matrix);
         }
         grassInst.count = gCount; grassInst.instanceMatrix.needsUpdate = true;
         if (grassInst.instanceColor) grassInst.instanceColor.needsUpdate = true;
@@ -553,146 +623,261 @@
           ? window.createRichObjectMaterial(spec)
           : new THREE.MeshStandardMaterial({ color: spec.color ?? 0xffffff, roughness: spec.roughness ?? 0.80, vertexColors: Boolean(spec.vertexColors) }));
 
-        // 1. Wildflower Stems & Colorful Petals (180)
-        const flStemGeo = _geo('land_fl_stem_v2', () => {
-          const stk = _tintVerts(new THREE.CylinderGeometry(0.22, 0.34, 7.8, 5).translate(0, 3.9, 0), (_, y) => [0.28, 0.46 + y * 0.04, 0.20]);
-          const lfL = _tintVerts(new THREE.BoxGeometry(1.1, 3.6, 0.20).translate(0, 1.6, 0).rotateZ(0.82).translate(-0.3, 0.7, 0), () => [0.34, 0.60, 0.24]);
-          const lfR = _tintVerts(new THREE.BoxGeometry(1.1, 3.6, 0.20).translate(0, 1.6, 0).rotateZ(-0.84).rotateY(1.1).translate(0.3, 0.8, 0), () => [0.38, 0.64, 0.26]);
+        // 1. Smooth Realistic Wildflower Stems, Leaves & Cupped Teardrop Petals (180)
+        const flStemGeo = _geo('land_fl_stem_v3', () => {
+          const stk = new THREE.CylinderGeometry(0.20, 0.32, 7.8, 8, 3).translate(0, 3.9, 0).toNonIndexed();
+          const sp = stk.attributes.position;
+          for (let i = 0; i < sp.count; i++) {
+            const y = sp.getY(i);
+            sp.setX(i, sp.getX(i) + Math.sin(y * 0.42) * 0.32);
+          }
+          stk.computeVertexNormals();
+          _tintVerts(stk, (_, y) => [0.28, 0.46 + y * 0.04, 0.20]);
+          const _mkStemLeaf = (ry, yPos, sc) => {
+            const lf = new THREE.PlaneGeometry(1.15 * sc, 3.4 * sc, 2, 4).toNonIndexed();
+            const lp = lf.attributes.position;
+            for (let i = 0; i < lp.count; i++) {
+              const x = lp.getX(i), y = lp.getY(i) + 1.7 * sc;
+              const t = Math.max(0, Math.min(1, y / (3.4 * sc)));
+              const widthProfile = Math.sin(t * Math.PI) * (1.15 - t * 0.35);
+              lp.setXYZ(i, x * widthProfile, y, Math.sin(t * Math.PI * 0.85) * 0.48 * sc + (x * x) * 0.22);
+            }
+            lf.rotateX(0.75); lf.rotateY(ry); lf.translate(0, yPos, 0); lf.computeVertexNormals();
+            return _tintVerts(lf, () => [0.35, 0.62, 0.24]);
+          };
+          const lfL = _mkStemLeaf(-Math.PI * 0.5, 0.9, 1.0), lfR = _mkStemLeaf(Math.PI * 0.55, 1.5, 0.88);
           return _scMerge ? _scMerge([stk, lfL, lfR]) : stk;
         });
-        const flBloomGeo = _geo('land_fl_bloom_v2', () => {
-          const pts = [_tintVerts(new THREE.CylinderGeometry(0.85, 0.55, 0.55, 7).translate(0, 7.85, 0), () => [0.96, 0.80, 0.28])];
+        const flBloomGeo = _geo('land_fl_bloom_v3', () => {
+          const ctr = _tintVerts(new THREE.SphereGeometry(0.68, 10, 7).scale(1.0, 0.55, 1.0).translate(0, 7.95, 0), () => [0.98, 0.82, 0.26]);
+          const pts = [ctr];
           for (let pi = 0; pi < 6; pi++) {
             const pa = (pi / 6) * Math.PI * 2;
-            const pet = _tintVerts(new THREE.BoxGeometry(1.05, 0.20, 2.15).translate(0, 0, 1.32).rotateX(-0.24).rotateY(pa).translate(0, 7.85, 0),
-              (x, _, z) => { const d = Math.min(1, Math.hypot(x, z) / 2.4); return [0.76 + d * 0.24, 0.74 + d * 0.24, 0.74 + d * 0.24]; });
-            pts.push(pet);
+            const pet = new THREE.PlaneGeometry(1.18, 2.05, 3, 4).toNonIndexed();
+            const pp = pet.attributes.position;
+            for (let vi = 0; vi < pp.count; vi++) {
+              const x = pp.getX(vi), y = pp.getY(vi) + 1.025;
+              const t = Math.max(0, Math.min(1, y / 2.05));
+              const oval = Math.sin(Math.pow(t, 0.68) * Math.PI);
+              const cup = (x * x) * 0.28 + Math.sin(t * Math.PI * 0.72) * 0.34;
+              pp.setXYZ(vi, x * (0.28 + 0.95 * oval), cup, y + 0.35);
+            }
+            pet.rotateY(pa); pet.translate(0, 7.86, 0); pet.computeVertexNormals();
+            pts.push(_tintVerts(pet, (x, _, z) => { const d = Math.min(1, Math.hypot(x, z) / 2.3); return [0.76 + d * 0.24, 0.74 + d * 0.24, 0.74 + d * 0.24]; }));
           }
           return _scMerge ? _scMerge(pts) : pts[0];
         });
-        // 2. Arched Woodland Ferns (120)
-        const fernGeo = _geo('land_fern_v2', () => {
+        // 2. Smooth Arching Tapered Woodland Ferns (120)
+        const fernGeo = _geo('land_fern_v3', () => {
           const pts = [];
-          for (let fi = 0; fi < 8; fi++) {
-            const ang = (fi / 8) * Math.PI * 2 + (fi % 2) * 0.25, inner = fi >= 5;
-            const len = inner ? 6.2 : 9.2, tilt = inner ? -0.62 : -0.30;
-            const fr = _tintVerts(new THREE.BoxGeometry(inner ? 1.35 : 1.75, 0.20, len).translate(0, 0, len * 0.5).rotateX(tilt).rotateY(ang),
-              (x, y, z) => { const d = Math.min(1, Math.hypot(x, z) / 9.0); return [0.55 + d * 0.45, 0.65 + d * 0.45, 0.45 + d * 0.38]; });
-            pts.push(fr);
+          for (let fi = 0; fi < 9; fi++) {
+            const ang = (fi / 9) * Math.PI * 2 + (fi % 2) * 0.22, inner = fi >= 5;
+            const len = inner ? 6.4 : 9.4, maxW = inner ? 1.55 : 1.95;
+            const fr = new THREE.PlaneGeometry(maxW, len, 2, 6).toNonIndexed();
+            const fp = fr.attributes.position;
+            for (let i = 0; i < fp.count; i++) {
+              const x = fp.getX(i), zFrac = Math.max(0, Math.min(1, (fp.getY(i) + len * 0.5) / len));
+              const taper = Math.sin(Math.pow(zFrac, 0.62) * Math.PI) * (1.0 - 0.15 * zFrac);
+              const droopY = (inner ? 2.8 : 2.1) * Math.sin(zFrac * Math.PI * 0.76) - zFrac * zFrac * 0.85;
+              const midribV = Math.abs(x) * 0.18;
+              fp.setXYZ(i, x * Math.max(0.06, taper), droopY + midribV + 0.35, zFrac * len);
+            }
+            fr.rotateY(ang); fr.computeVertexNormals();
+            pts.push(_tintVerts(fr, (x, _, z) => { const d = Math.min(1, Math.hypot(x, z) / 9.2); return [0.56 + d * 0.42, 0.68 + d * 0.42, 0.46 + d * 0.36]; }));
           }
           return _scMerge ? _scMerge(pts) : pts[0];
         });
-        // 3. Toadstool Mushroom Clumps (72)
-        const shroomGeo = _geo('land_shroom_v2', () => {
+        // 3. Smooth Organic Toadstool Mushroom Clumps (72)
+        const shroomGeo = _geo('land_shroom_v3', () => {
           const mkOne = (sx, sz, h, r) => {
-            const st = _tintVerts(new THREE.CylinderGeometry(r * 0.28, r * 0.38, h, 6).translate(sx, h * 0.5, sz), () => [0.92, 0.88, 0.80]);
-            const capRaw = _scLathe ? _scLathe([[r * 0.25, h * 0.88], [r * 1.08, h * 0.94], [r * 0.85, h * 1.24], [r * 0.05, h * 1.40]], 9) : new THREE.ConeGeometry(r, h * 0.5, 8).translate(0, h * 1.1, 0);
-            const cap = _tintVerts(capRaw.translate(sx, 0, sz), (_, y) => [0.85 + Math.min(0.15, (y - h) * 0.12), 0.82, 0.80]);
+            const st = new THREE.CylinderGeometry(r * 0.24, r * 0.36, h, 10, 3).translate(sx, h * 0.5, sz).toNonIndexed();
+            const sp = st.attributes.position;
+            for (let i = 0; i < sp.count; i++) {
+              const ly = Math.max(0, Math.min(1, sp.getY(i) / h));
+              sp.setX(i, sp.getX(i) + Math.sin(ly * Math.PI) * r * 0.14);
+            }
+            st.computeVertexNormals();
+            _tintVerts(st, () => [0.92, 0.88, 0.80]);
+            const capRaw = _scLathe ? _scLathe([[r * 0.22, h * 0.84], [r * 0.96, h * 0.90], [r * 1.04, h * 1.04], [r * 0.82, h * 1.25], [r * 0.42, h * 1.36], [0.02, h * 1.40]], 16) : new THREE.SphereGeometry(r, 14, 10).scale(1, 0.55, 1).translate(0, h * 1.05, 0);
+            const cap = _tintVerts(capRaw.translate(sx, 0, sz), (_, y) => [0.86 + Math.min(0.14, (y - h) * 0.10), 0.82, 0.80]);
             return [st, cap];
           };
           const parts = [...mkOne(0, 0, 4.4, 2.2), ...mkOne(2.0, 1.2, 2.9, 1.45), ...mkOne(-1.7, -1.0, 2.4, 1.2)];
           return _scMerge ? _scMerge(parts) : parts[0];
         });
-        // 4. Sculpted Pine Cones (110)
-        const coneGeo = _geo('land_pinecone_v2', () => {
+        // 4. Smooth Sculpted Pine Cones (110)
+        const coneGeo = _geo('land_pinecone_v3', () => {
           const cg = _scLathe
-            ? _scLathe([[0.28, 0], [1.35, 0.72], [1.65, 1.80], [1.32, 3.0], [0.65, 3.95], [0.10, 4.35]], 9, 7, 0.24, 2.2)
-            : new THREE.ConeGeometry(1.5, 4.3, 7);
+            ? _scLathe([[0.18, 0], [1.18, 0.65], [1.62, 1.65], [1.38, 2.85], [0.76, 3.85], [0.12, 4.35]], 14)
+            : new THREE.SphereGeometry(1.5, 12, 10).scale(0.9, 1.45, 0.9);
           cg.rotateZ(1.48); cg.translate(0, 1.28, 0);
-          return _tintVerts(cg, (_, y) => { const s = 0.72 + Math.min(0.32, y * 0.18); return [s * 1.05, s * 0.95, s * 0.86]; });
+          return _tintVerts(cg, (x, y, z) => {
+            const sc = 0.72 + Math.min(0.28, y * 0.16) + 0.06 * Math.sin(x * 4.5 + z * 4.5);
+            return [sc * 1.04, sc * 0.94, sc * 0.84];
+          });
         });
-        // 5. Forked Fallen Twigs (110)
-        const twigGeo = _geo('land_twig_v2', () => {
-          const m = new THREE.CylinderGeometry(0.26, 0.42, 12.6, 5).rotateZ(1.52).translate(0, 0.36, 0);
-          const f1 = new THREE.CylinderGeometry(0.16, 0.26, 5.2, 5).rotateZ(1.48).rotateY(0.56).translate(2.0, 0.42, 1.6);
-          const f2 = new THREE.CylinderGeometry(0.15, 0.24, 4.4, 5).rotateZ(1.50).rotateY(-0.52).translate(-1.6, 0.38, -1.3);
+        // 5. Smooth Forked Fallen Twigs (110)
+        const twigGeo = _geo('land_twig_v3', () => {
+          const m = new THREE.CylinderGeometry(0.22, 0.40, 12.6, 8, 3).rotateZ(1.52).translate(0, 0.34, 0).toNonIndexed();
+          const f1 = new THREE.CylinderGeometry(0.14, 0.24, 5.2, 7).rotateZ(1.48).rotateY(0.56).translate(2.0, 0.40, 1.6);
+          const f2 = new THREE.CylinderGeometry(0.13, 0.22, 4.4, 7).rotateZ(1.50).rotateY(-0.52).translate(-1.6, 0.36, -1.3);
           const mrg = _scMerge ? _scMerge([m, f1, f2]) : m;
           return _tintVerts(mrg, (x) => { const s = 0.80 + Math.min(0.22, Math.abs(x) * 0.04); return [s, s * 0.96, s * 0.90]; });
         });
-        // 6. Cupped Fallen Leaf Clusters (160 clusters = ~480 fallen leaves)
-        const leafGeo = _geo('land_leaf_v2', () => {
+        // 6. Smooth Cupped Fallen Leaf Clusters (160 clusters = ~480 fallen leaves)
+        const leafGeo = _geo('land_leaf_v3', () => {
           const mkLeaf = (ox, oz, ry, sc) => {
-            const bl = new THREE.BoxGeometry(2.4 * sc, 0.12, 3.8 * sc, 2, 1, 2).toNonIndexed();
+            const bl = new THREE.PlaneGeometry(2.3 * sc, 3.8 * sc, 4, 6).rotateX(-Math.PI * 0.5).toNonIndexed();
             const pa = bl.attributes.position;
             for (let i = 0; i < pa.count; i++) {
               const lx = pa.getX(i), lz = pa.getZ(i);
-              const tip = Math.max(0.12, 1.0 - Math.abs(lz) * 0.45);
-              pa.setXYZ(i, lx * tip, Math.abs(lx) * 0.16 + (lz * lz) * 0.02, lz);
+              const t = (lz / (1.9 * sc) + 1.0) * 0.5;
+              const widthCurve = Math.sin(Math.pow(Math.max(0.02, Math.min(0.98, t)), 0.78) * Math.PI);
+              pa.setXYZ(i, lx * widthCurve, Math.abs(lx) * 0.14 + Math.sin(t * Math.PI) * 0.12, lz);
             }
-            bl.rotateY(ry); bl.translate(ox, 0.24, oz); bl.computeVertexNormals();
+            bl.rotateY(ry); bl.translate(ox, 0.22, oz); bl.computeVertexNormals();
             return _tintVerts(bl, (x) => { const edge = Math.min(1, Math.abs(x) * 0.5); return [0.98 - edge * 0.14, 0.94 - edge * 0.16, 0.86 - edge * 0.18]; });
           };
           const parts = [mkLeaf(0, 0, 0.2, 1.0), mkLeaf(1.8, 1.4, 1.6, 0.82), mkLeaf(-1.6, 1.1, -0.9, 0.88)];
           return _scMerge ? _scMerge(parts) : parts[0];
         });
-        // 7. Mossy Fallen Logs (36)
-        const logGeo = _geo('land_log_v2', () => {
-          const lg = _scLathe ? _scLathe([[3.2, 0], [2.8, 9], [3.0, 18], [2.5, 27]], 10, 6, 0.12) : new THREE.CylinderGeometry(2.6, 3.2, 27, 9);
-          lg.rotateZ(1.54); lg.translate(13.5, 1.5, 0);
-          const snag = new THREE.CylinderGeometry(0.65, 1.1, 5.5, 6).rotateZ(-0.55).translate(-2.0, 3.4, 0.8);
+        // 7. Smooth Mossy Fallen Logs (36)
+        const logGeo = _geo('land_log_v3', () => {
+          const lg = _scLathe ? _scLathe([[2.6, 0], [3.1, 2.5], [2.85, 11], [2.95, 19], [2.5, 25.5], [2.0, 27]], 14) : new THREE.CylinderGeometry(2.6, 3.2, 27, 12);
+          lg.rotateZ(1.54); lg.translate(13.5, 1.6, 0);
+          const snag = new THREE.CylinderGeometry(0.55, 1.0, 5.2, 8).rotateZ(-0.55).translate(-2.0, 3.4, 0.8);
           const mrg = _scMerge ? _scMerge([lg, snag]) : lg;
           return _tintVerts(mrg, (_, y) => y > 3.0 ? [0.78, 0.92, 0.70] : [0.76, 0.72, 0.68]);
         });
 
-        // Animal Cohort Geometries (+Z facing forward, sized relative to 15u Deer & 32u Hero!)
-        // A. Cottontail Rabbit (22)
-        const rabbitGeo = _geo('land_ani_rabbit_v2', () => {
-          const body = _tintVerts(new THREE.SphereGeometry(2.4, 8, 6).scale(0.85, 0.88, 1.32).translate(0, 2.2, -0.3), (_, y) => y > 2.2 ? [0.94, 0.92, 0.90] : [1.05, 1.02, 0.98]);
-          const head = _tintVerts(new THREE.SphereGeometry(1.55, 7, 6).scale(0.88, 0.92, 1.12).translate(0, 3.8, 2.5), () => [0.96, 0.94, 0.92]);
-          const earL = _tintVerts(new THREE.CylinderGeometry(0.32, 0.45, 3.0, 5).rotateX(-0.22).rotateZ(0.18).translate(-0.58, 5.8, 2.0), () => [0.92, 0.82, 0.80]);
-          const earR = _tintVerts(new THREE.CylinderGeometry(0.32, 0.45, 3.0, 5).rotateX(-0.22).rotateZ(-0.18).translate(0.58, 5.8, 2.0), () => [0.92, 0.82, 0.80]);
-          const tail = _tintVerts(new THREE.SphereGeometry(0.95, 6, 5).translate(0, 2.2, -3.4), () => [1.20, 1.18, 1.16]);
-          return _scMerge ? _scMerge([body, head, earL, earR, tail]) : body;
+        // Articulated Animal Cohort Geometries (+Z facing forward, smooth sculpting & independent moving head/limbs/tail/wings!)
+        // A. Articulated Cottontail Rabbit (11): body + head/ears + fore/hind legs
+        const rabbitBodyGeo = _geo('land_ani_rab_body_v3', () => {
+          const torso = _tintVerts(new THREE.SphereGeometry(2.3, 12, 9).scale(0.84, 0.88, 1.32).translate(0, 2.1, -0.3), (_, y) => y > 2.2 ? [0.94, 0.92, 0.90] : [1.06, 1.02, 0.98]);
+          const tail = _tintVerts(new THREE.SphereGeometry(0.95, 10, 8).translate(0, 2.2, -3.4), () => [1.22, 1.20, 1.18]);
+          return _scMerge ? _scMerge([torso, tail]) : torso;
         });
-        // B. Woodland Fox (16)
-        const foxGeo = _geo('land_ani_fox_v2', () => {
-          const body = _tintVerts(new THREE.CylinderGeometry(1.85, 2.1, 8.2, 7).rotateX(Math.PI / 2).translate(0, 3.8, 0), (_, y) => y > 3.8 ? [0.98, 0.94, 0.90] : [1.08, 1.04, 0.98]);
-          const head = _tintVerts(new THREE.ConeGeometry(1.6, 3.8, 6).rotateX(1.52).translate(0, 5.2, 5.1), () => [0.98, 0.95, 0.92]);
-          const earL = _tintVerts(new THREE.ConeGeometry(0.55, 1.6, 4).translate(-0.80, 6.5, 3.8), () => [0.40, 0.34, 0.32]);
-          const earR = _tintVerts(new THREE.ConeGeometry(0.55, 1.6, 4).translate(0.80, 6.5, 3.8), () => [0.40, 0.34, 0.32]);
-          const tail = _tintVerts(new THREE.ConeGeometry(1.15, 6.4, 6).rotateX(-1.08).translate(0, 3.9, -6.1), (_, __, z) => z < -7.2 ? [1.20, 1.18, 1.14] : [0.94, 0.90, 0.88]);
-          const legs = [[-1.05, 2.5], [1.05, 2.5], [-1.05, -2.6], [1.05, -2.6]].map(([lx, lz]) =>
-            _tintVerts(new THREE.CylinderGeometry(0.45, 0.32, 3.5, 5).translate(lx, 1.75, lz), () => [0.38, 0.34, 0.32]));
-          return _scMerge ? _scMerge([body, head, earL, earR, tail, ...legs]) : body;
+        const rabbitHeadGeo = _geo('land_ani_rab_head_v3', () => {
+          const cranium = _tintVerts(new THREE.SphereGeometry(1.48, 12, 9).scale(0.88, 0.92, 1.14).translate(0, 0.45, 0.65), () => [0.96, 0.94, 0.92]);
+          const nose = _tintVerts(new THREE.SphereGeometry(0.36, 8, 6).translate(0, 0.25, 2.25), () => [0.98, 0.72, 0.72]);
+          const earL = _tintVerts(new THREE.SphereGeometry(0.44, 9, 8).scale(0.55, 3.4, 0.45).rotateX(-0.22).rotateZ(0.18).translate(-0.52, 2.55, 0.15), () => [0.92, 0.80, 0.78]);
+          const earR = _tintVerts(new THREE.SphereGeometry(0.44, 9, 8).scale(0.55, 3.4, 0.45).rotateX(-0.22).rotateZ(-0.18).translate(0.52, 2.55, 0.15), () => [0.92, 0.80, 0.78]);
+          return _scMerge ? _scMerge([cranium, nose, earL, earR]) : cranium;
         });
-        // C. Articulated Soaring/Landing Birds (body + tail + beak + separate left/right wings so wings flap, glide, and fold when perched!)
-        const birdBodyGeo = _geo('land_ani_bird_body_v3', () => {
-          const torso = _tintVerts(new THREE.SphereGeometry(0.95, 7, 6).scale(0.85, 0.85, 2.1), (_, y) => y > 0 ? [0.90, 0.88, 0.86] : [1.08, 1.04, 0.98]);
-          const head = _tintVerts(new THREE.SphereGeometry(0.62, 6, 5).translate(0, 0.62, 1.85), () => [0.95, 0.92, 0.88]);
-          const beak = _tintVerts(new THREE.ConeGeometry(0.22, 0.85, 4).rotateX(Math.PI * 0.5).translate(0, 0.56, 2.65), () => [0.96, 0.76, 0.30]);
-          const tail = _tintVerts(new THREE.BoxGeometry(2.1, 0.14, 2.3).translate(0, 0.08, -2.5), () => [0.76, 0.74, 0.72]);
-          const leg = _tintVerts(new THREE.CylinderGeometry(0.08, 0.08, 0.85, 4).translate(0, -0.95, -0.1), () => [0.82, 0.64, 0.32]);
-          return _scMerge ? _scMerge([torso, head, beak, tail, leg]) : torso;
+        const rabbitLegFGeo = _geo('land_ani_rab_legf_v3', () => {
+          const pL = _tintVerts(new THREE.CylinderGeometry(0.34, 0.24, 1.7, 8).translate(-0.78, -0.85, 0.1), () => [0.94, 0.90, 0.86]);
+          const pR = _tintVerts(new THREE.CylinderGeometry(0.34, 0.24, 1.7, 8).translate(0.78, -0.85, 0.1), () => [0.94, 0.90, 0.86]);
+          return _scMerge ? _scMerge([pL, pR]) : pL;
         });
-        const _mkBirdWingGeo = (sideSign) => _geo(`land_ani_bird_w_${sideSign > 0 ? 'r' : 'l'}_v3`, () => {
-          const inner = _tintVerts(new THREE.BoxGeometry(3.8, 0.16, 2.1).translate(sideSign * 1.9, 0, 0), () => [0.96, 0.94, 0.92]);
-          const tip = _tintVerts(new THREE.BoxGeometry(2.8, 0.12, 1.4).rotateY(sideSign * 0.22).translate(sideSign * 4.8, 0.08, -0.35), () => [0.76, 0.74, 0.74]);
-          return _scMerge ? _scMerge([inner, tip]) : inner;
+        const rabbitLegHGeo = _geo('land_ani_rab_legh_v3', () => {
+          const hL = _tintVerts(new THREE.SphereGeometry(0.88, 9, 7).scale(0.65, 1.15, 1.25).translate(-1.05, -0.45, -0.35), () => [0.90, 0.88, 0.84]);
+          const hR = _tintVerts(new THREE.SphereGeometry(0.88, 9, 7).scale(0.65, 1.15, 1.25).translate(1.05, -0.45, -0.35), () => [0.90, 0.88, 0.84]);
+          return _scMerge ? _scMerge([hL, hR]) : hL;
+        });
+        // B. Articulated Woodland Fox (8): sculpted torso + head/ears + bushy wagging tail + 4-leg diagonal trot pairs
+        const foxBodyGeo = _geo('land_ani_fox_body_v3', () => {
+          const raw = _scLathe ? _scLathe([[0.9, -4.2], [1.88, -2.5], [1.62, 0.2], [2.05, 2.6], [1.45, 4.4]], 14) : new THREE.CylinderGeometry(1.8, 2.0, 8.2, 12);
+          return _tintVerts(raw.rotateX(Math.PI / 2).translate(0, 3.8, 0), (_, y) => y > 3.8 ? [0.98, 0.94, 0.90] : [1.10, 1.06, 1.0]);
+        });
+        const foxHeadGeo = _geo('land_ani_fox_head_v3', () => {
+          const neck = _tintVerts(new THREE.CylinderGeometry(1.05, 1.45, 2.6, 10).rotateX(0.62).translate(0, 0.35, 0.4), () => [0.98, 0.95, 0.92]);
+          const skull = _tintVerts(new THREE.SphereGeometry(1.38, 12, 9).scale(0.92, 0.86, 1.15).translate(0, 1.15, 1.25), () => [0.98, 0.95, 0.92]);
+          const snout = _tintVerts(new THREE.CylinderGeometry(0.32, 0.78, 2.0, 10).rotateX(Math.PI * 0.52).translate(0, 0.92, 2.75), () => [0.94, 0.90, 0.86]);
+          const nose = _tintVerts(new THREE.SphereGeometry(0.24, 7, 5).translate(0, 0.88, 3.75), () => [0.18, 0.16, 0.16]);
+          const earL = _tintVerts(new THREE.ConeGeometry(0.52, 1.5, 8).scale(0.85, 1, 0.55).translate(-0.78, 2.45, 0.95), () => [0.36, 0.30, 0.28]);
+          const earR = _tintVerts(new THREE.ConeGeometry(0.52, 1.5, 8).scale(0.85, 1, 0.55).translate(0.78, 2.45, 0.95), () => [0.36, 0.30, 0.28]);
+          return _scMerge ? _scMerge([neck, skull, snout, nose, earL, earR]) : skull;
+        });
+        const foxTailGeo = _geo('land_ani_fox_tail_v3', () => {
+          const tRaw = _scLathe ? _scLathe([[0.45, 0], [1.18, -2.2], [1.05, -4.6], [0.22, -6.6]], 12) : new THREE.ConeGeometry(1.1, 6.4, 10).rotateX(-Math.PI * 0.5).translate(0, 0, -3.2);
+          if (_scLathe) tRaw.rotateX(-Math.PI * 0.5);
+          return _tintVerts(tRaw, (_, __, z) => z < -4.5 ? [1.22, 1.20, 1.16] : [0.96, 0.92, 0.88]);
+        });
+        const _mkFoxLegPairGeo = (sideA) => _geo(`land_ani_fox_legs_${sideA ? 'a' : 'b'}_v3`, () => {
+          const fX = sideA ? -1.05 : 1.05, bX = -fX;
+          const lf = _tintVerts(new THREE.CylinderGeometry(0.42, 0.28, 3.4, 9).translate(fX, -1.7, 2.45), () => [0.36, 0.32, 0.30]);
+          const lb = _tintVerts(new THREE.CylinderGeometry(0.48, 0.28, 3.4, 9).translate(bX, -1.7, -2.55), () => [0.36, 0.32, 0.30]);
+          return _scMerge ? _scMerge([lf, lb]) : lf;
+        });
+        const foxLegAGeo = _mkFoxLegPairGeo(true), foxLegBGeo = _mkFoxLegPairGeo(false);
+
+        // C. Articulated Real-Silhouette Soaring/Pecking Birds (16): aerodynamic chest/rump + fanned tail + articulated head/beak + cambered swept wings (NOT books!)
+        const birdBodyGeo = _geo('land_ani_bird_body_v4', () => {
+          const raw = _scLathe ? _scLathe([[0.18, -2.2], [0.76, -0.8], [0.94, 0.3], [0.72, 1.4], [0.22, 1.9]], 12) : new THREE.SphereGeometry(0.92, 12, 9).scale(0.85, 0.85, 2.0);
+          if (_scLathe) raw.rotateX(Math.PI / 2);
+          const torso = _tintVerts(raw, (_, y) => y > 0 ? [0.90, 0.88, 0.86] : [1.08, 1.04, 0.98]);
+          // Fanned multi-feather swallowtail/raptor tail plane
+          const tail = new THREE.PlaneGeometry(2.5, 2.6, 4, 2).rotateX(-Math.PI * 0.5).toNonIndexed();
+          const tp = tail.attributes.position;
+          for (let i = 0; i < tp.count; i++) {
+            const tx = tp.getX(i), tz = tp.getZ(i);
+            const tBack = (1.3 - tz) / 2.6; // 0 at base (z=+1.3), 1 at tip (z=-1.3)
+            const fan = 0.28 + 0.85 * tBack;
+            const notch = (1.0 - Math.abs(tx) / 1.25) * 0.42 * tBack;
+            tp.setXYZ(i, tx * fan, tBack * 0.26, tz - 2.6 + notch);
+          }
+          tail.computeVertexNormals();
+          _tintVerts(tail, () => [0.74, 0.72, 0.70]);
+          const feet = _tintVerts(new THREE.CylinderGeometry(0.08, 0.08, 0.95, 6).rotateX(-0.35).translate(0, -0.85, -0.35), () => [0.84, 0.64, 0.30]);
+          return _scMerge ? _scMerge([torso, tail, feet]) : torso;
+        });
+        const birdHeadGeo = _geo('land_ani_bird_head_v4', () => {
+          const neck = _tintVerts(new THREE.CylinderGeometry(0.42, 0.58, 0.95, 10).rotateX(0.35).translate(0, 0.25, 0.15), () => [0.94, 0.90, 0.86]);
+          const cranium = _tintVerts(new THREE.SphereGeometry(0.58, 11, 9).scale(0.92, 0.92, 1.10).translate(0, 0.68, 0.42), () => [0.95, 0.92, 0.88]);
+          const beak = _tintVerts(new THREE.ConeGeometry(0.18, 0.88, 8).rotateX(Math.PI * 0.52).translate(0, 0.58, 1.26), () => [0.98, 0.76, 0.28]);
+          return _scMerge ? _scMerge([neck, cranium, beak]) : cranium;
+        });
+        const _mkBirdWingGeo = (sideSign) => _geo(`land_ani_bird_w_${sideSign > 0 ? 'r' : 'l'}_v4`, () => {
+          const wg = new THREE.PlaneGeometry(6.8, 2.35, 8, 3).rotateX(-Math.PI * 0.5).toNonIndexed();
+          const wp = wg.attributes.position;
+          for (let i = 0; i < wp.count; i++) {
+            const xBase = wp.getX(i) + 3.4; // 0..6.8 root to tip
+            const u = Math.max(0, Math.min(1, xBase / 6.8));
+            const vCord = wp.getZ(i) / 1.175; // +1 leading edge .. -1 trailing edge
+            // Swept gull/falcon leading edge: bows forward smoothly toward wrist (u~0.35), sweeps back to sleek tip
+            const leadZ = 0.85 + Math.sin(u * Math.PI * 0.82) * 0.55 - Math.pow(u, 1.7) * 2.05;
+            const chord = 2.25 * (1.0 - Math.pow(u, 1.45) * 0.82);
+            const zNew = leadZ - (1.0 - vCord) * 0.5 * chord;
+            const dihedralY = Math.sin(u * Math.PI * 0.78) * 0.42 - u * 0.15;
+            const camberY = Math.sin(((vCord + 1) * 0.5) * Math.PI) * 0.24 * (1 - u * 0.55);
+            wp.setXYZ(i, xBase * sideSign, dihedralY + camberY, zNew);
+          }
+          wg.computeVertexNormals();
+          return _tintVerts(wg, (x, _, z) => { const tip = Math.min(1, Math.abs(x) / 6.8); return [0.98 - tip * 0.24, 0.96 - tip * 0.24, 0.92 - tip * 0.20]; });
         });
         const birdWingLGeo = _mkBirdWingGeo(-1), birdWingRGeo = _mkBirdWingGeo(1);
 
-        // D. Articulated Meadow Butterflies (body + left/right flapping/basking wings)
-        const bflyBodyGeo = _geo('land_ani_bfly_body_v3', () => {
-          const body = _tintVerts(new THREE.CylinderGeometry(0.18, 0.14, 2.1, 5).rotateX(Math.PI / 2), () => [0.24, 0.22, 0.22]);
-          return body;
+        // D. Smooth Scalloped Swallowtail/Monarch Butterflies (18, curved shapes rather than rectangular book-boxes)
+        const bflyBodyGeo = _geo('land_ani_bfly_body_v4', () => {
+          const b = _tintVerts(new THREE.CylinderGeometry(0.16, 0.11, 2.1, 8).rotateX(Math.PI / 2), () => [0.22, 0.20, 0.20]);
+          const antL = _tintVerts(new THREE.CylinderGeometry(0.03, 0.03, 0.85, 5).rotateX(-0.5).rotateZ(0.32).translate(-0.18, 0.35, 1.15), () => [0.22, 0.20, 0.20]);
+          const antR = _tintVerts(new THREE.CylinderGeometry(0.03, 0.03, 0.85, 5).rotateX(-0.5).rotateZ(-0.32).translate(0.18, 0.35, 1.15), () => [0.22, 0.20, 0.20]);
+          return _scMerge ? _scMerge([b, antL, antR]) : b;
         });
-        const _mkBflyWingGeo = (sideSign) => _geo(`land_ani_bfly_w_${sideSign > 0 ? 'r' : 'l'}_v3`, () => {
-          const fore = _tintVerts(new THREE.BoxGeometry(2.1, 0.07, 1.5).translate(sideSign * 1.1, 0, 0.45), (x) => { const edge = Math.min(1, Math.abs(x) / 2.2); return [1.0 - edge * 0.12, 0.98 - edge * 0.12, 0.96]; });
-          const hind = _tintVerts(new THREE.BoxGeometry(1.5, 0.07, 1.3).translate(sideSign * 0.8, -0.02, -0.55), () => [0.88, 0.86, 0.88]);
-          return _scMerge ? _scMerge([fore, hind]) : fore;
+        const _mkBflyWingGeo = (sideSign) => _geo(`land_ani_bfly_w_${sideSign > 0 ? 'r' : 'l'}_v4`, () => {
+          const sh = new THREE.Shape();
+          sh.moveTo(0, 0.25);
+          sh.bezierCurveTo(sideSign * 0.9, 1.55, sideSign * 2.45, 1.45, sideSign * 2.25, 0.35);
+          sh.bezierCurveTo(sideSign * 2.15, -0.15, sideSign * 1.45, -0.15, sideSign * 1.15, -0.30);
+          sh.bezierCurveTo(sideSign * 1.65, -0.65, sideSign * 1.40, -1.45, sideSign * 0.72, -1.55);
+          sh.bezierCurveTo(sideSign * 0.35, -1.25, sideSign * 0.12, -0.75, 0, -0.35);
+          sh.closePath();
+          const wg = new THREE.ShapeGeometry(sh, 10).rotateX(-Math.PI * 0.5).toNonIndexed();
+          wg.computeVertexNormals();
+          return _tintVerts(wg, (x) => { const edge = Math.min(1, Math.abs(x) / 2.25); return [1.0 - edge * 0.16, 0.98 - edge * 0.14, 0.96 - edge * 0.10]; });
         });
         const bflyWingLGeo = _mkBflyWingGeo(-1), bflyWingRGeo = _mkBflyWingGeo(1);
 
-        const flowerCols = isSnowBiome ? [0x8aa8e0, 0xb89ee8, 0xd8dce4, 0x7ac0d4] : [0xd94e46, 0xe8b43c, 0x5282de, 0x945ed0, 0xe0d6c4, 0xde6c94, 0xe07e34];
-        const fernCols = isSnowBiome ? [0x6e8880, 0x829c94, 0x627874] : [0x4c7c3e, 0x649042, 0x7c8646, 0x3e6a3a, 0x5c8452];
-        const shroomCols = [0xc84e3c, 0xd89c3c, 0xd8ceb6, 0x946444, 0x7c8868];
+        const flowerCols = isSnowBiome ? [0x82b4ff, 0xc792ea, 0xe6ecf5, 0x64dfdf, 0xff9ebb] : [0xf94144, 0xf9c74f, 0x277da1, 0x9b5de5, 0xf15bb5, 0x00bbf9, 0xf3722c, 0xffe66d];
+        const fernCols = isSnowBiome ? [0x6e9088, 0x84a49c, 0x5e7d78] : [0x3d8c45, 0x68a347, 0x8ea646, 0x2f7443, 0x529258];
+        const shroomCols = [0xe63946, 0xffb703, 0x4cc9f0, 0xb5179e, 0x80ed99, 0xe8d5b7];
         const woodScatterCols = [0x8c6442, 0x6c4e36, 0xa27e56, 0x787266, 0x5c422c];
-        const leafCols = isSnowBiome ? [0x8c7256, 0x747e6c, 0xa29078] : [0xb64c34, 0xd08838, 0x9c6e3e, 0x688240, 0x863e32, 0xc2a246];
+        const leafCols = isSnowBiome ? [0x8c7256, 0x747e6c, 0xa29078] : [0xc84b31, 0xe08d38, 0xb0723e, 0x6ea042, 0x9e3b33, 0xd8b242];
 
         const flStemMat = _fMat('land_fl_stem_mat_v1', { color: 0xb6c6a4, pbrKind: 'foliage', roughness: 0.84, sheen: 0.45, vertexColors: true });
-        const flBloomMat = _fMat('land_fl_bloom_mat_v1', { color: 0xeae4dc, pbrKind: 'cloth', roughness: 0.62, sheen: 0.72, vertexColors: true });
-        const fernMat = _fMat('land_fern_mat_v1', { color: 0xc2cca8, pbrKind: 'foliage', roughness: 0.82, sheen: 0.56, vertexColors: true });
-        const shroomMat = _fMat('land_shroom_mat_v1', { color: 0xe0d8ce, pbrKind: 'leather', roughness: 0.68, sheen: 0.35, vertexColors: true });
+        const flBloomMat = _fMat('land_fl_bloom_mat_v1', { color: 0xf4f0ea, pbrKind: 'cloth', roughness: 0.54, sheen: 0.78, vertexColors: true });
+        const fernMat = _fMat('land_fern_mat_v1', { color: 0xc8d4b2, pbrKind: 'foliage', roughness: 0.82, sheen: 0.56, vertexColors: true });
+        const shroomMat = _mat('land_shroom_mat_v2', () => new THREE.MeshStandardMaterial({ color: 0xeae4dc, roughness: 0.56, emissive: 0x182630, emissiveIntensity: 0.28, vertexColors: true }));
         const woodObjMat = _fMat('land_wood_obj_mat_v1', { color: 0xb4a490, pbrKind: 'wood', roughness: 0.86, vertexColors: true });
         const leafMat = _fMat('land_leaf_mat_v1', { color: 0xdad2c4, pbrKind: 'cloth', roughness: 0.74, sheen: 0.48, side: THREE.DoubleSide, vertexColors: true });
 
@@ -700,7 +885,7 @@
           const im = new THREE.InstancedMesh(geo, mat, count);
           const dum = new THREE.Object3D(), cTmp = new THREE.Color();
           let placed = 0;
-          for (let attempt = 0; attempt < count * 4 && placed < count; attempt++) {
+          for (let attempt = 0; attempt < count * 8 && placed < count; attempt++) {
             const hh = (((attempt + 1) * 2654435761 + seedNum * 193 + count * 17) >>> 0);
             const ang = ((hh % 6283) * 0.001);
             const closeZone = ((hh >> 4) % 100) < 68;
@@ -709,7 +894,9 @@
             const sx = Math.cos(ang) * rad, sz = Math.sin(ang) * rad;
             if (Math.abs(sx) < 48 || Math.abs(sz) < 48) continue;
             if (opts.skipCenter && Math.hypot(sx, sz) < opts.skipCenter) continue;
-            const sy = getTerrainHeight(sx, sz) + (opts.yOff || 0);
+            const rawGroundY = getTerrainHeight(sx, sz);
+            if (isHardTerrainAt(sx, sz, rawGroundY)) continue;
+            const sy = rawGroundY + (opts.yOff || 0);
             const sc = scMin + (((hh >> 12) % 100) * 0.01) * (scMax - scMin);
             dum.position.set(sx, sy, sz);
             dum.rotation.set(opts.tilt ? (((hh >> 18) % 21) - 10) * 0.025 : 0, (hh % 628) * 0.01, opts.tilt ? (((hh >> 22) % 21) - 10) * 0.025 : 0);
@@ -781,13 +968,14 @@
         }
         if (!birdPerches.length) birdPerches.push({ x: 200, y: getTerrainHeight(200, 200) + 1.2, z: 200, kind: 'ground' });
 
-        // 4 Animated Outdoor Animal Cohorts (98 Animals: Rabbits, Foxes, Autonomous Landing/Flapping Birds & Butterflies)
+        // Halved & Articulated Outdoor Animal Cohorts (11 Rabbits, 8 Foxes, 16 Birds, 18 Butterflies) + Fire-Breathing Sky Dragon
         const _outdoorFauna = [];
-        const _spawnArticulatedFliers = (kind, bodyGeo, wLGeo, wRGeo, mat, count, cols, scMin, scMax, perches) => {
+        const _spawnArticulatedFliers = (kind, bodyGeo, wLGeo, wRGeo, headGeo, mat, count, cols, scMin, scMax, perches) => {
           const bInst = new THREE.InstancedMesh(bodyGeo, mat, count);
           const wlInst = new THREE.InstancedMesh(wLGeo, mat, count);
           const wrInst = new THREE.InstancedMesh(wRGeo, mat, count);
-          [bInst, wlInst, wrInst].forEach(im => {
+          const hInst = headGeo ? new THREE.InstancedMesh(headGeo, mat, count) : null;
+          [bInst, wlInst, wrInst, hInst].filter(Boolean).forEach(im => {
             im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
             im.castShadow = kind === 'bird'; im.receiveShadow = true;
             im.frustumCulled = false;
@@ -798,41 +986,49 @@
             const h = ((i * 2654435761 + seedNum * 317 + count * 53) >>> 0);
             const p0 = perches[i % perches.length];
             const pTarget = perches[(i * 7 + 3 + (h % perches.length)) % perches.length];
-            const startPerched = (i % 10) < 3; // 30% begin perched pecking/basking; 70% start in active flight
+            const startPerched = (i % 10) < 3;
             const sc = scMin + (((h >> 12) % 100) * 0.01) * (scMax - scMin);
             const isBfly = kind === 'butterfly';
-            const altOff = isBfly ? (flowerSpots.length ? 8.2 * (p0.sc || 1) : 6.0) : 0;
-            const sx = startPerched ? p0.x : p0.x + Math.cos(i) * (isBfly ? 25 : 140);
-            const sz = startPerched ? p0.z : p0.z + Math.sin(i) * (isBfly ? 25 : 140);
-            const sy = startPerched ? (p0.y + altOff) : (p0.y + (isBfly ? 12 + (h % 14) : 42 + (h % 75)));
+            const altOff = isBfly ? (flowerSpots.length ? 7.8 * (p0.sc || 1) : 4.5) : 0;
+            const sx = startPerched ? p0.x : p0.x + Math.cos(i) * (isBfly ? 22 : 140);
+            const sz = startPerched ? p0.z : p0.z + Math.sin(i) * (isBfly ? 22 : 140);
+            const sy = startPerched ? (p0.y + altOff) : (p0.y + (isBfly ? 4 + (h % 7) : 42 + (h % 75)));
             items.push({
               x: sx, y: sy, z: sz,
               vx: 0, vz: 0, yaw: (h % 628) * 0.01,
               state: startPerched ? 'perched' : 'fly',
               timer: startPerched ? (2.0 + (h % 5)) : (3.0 + (h % 6)),
-              tx: pTarget.x, ty: pTarget.y + (isBfly ? 8.2 * (pTarget.sc || 1) : 0), tz: pTarget.z,
+              tx: pTarget.x, ty: pTarget.y + (isBfly ? 7.8 * (pTarget.sc || 1) : 0), tz: pTarget.z,
               targetKind: pTarget.kind || 'flower',
               perchKind: p0.kind || 'flower',
-              cruiseAlt: isBfly ? (10 + (h % 14)) : (36 + (h % 68)),
-              speed: isBfly ? (20 + (h % 16)) : (62 + (h % 38)),
+              cruiseAlt: isBfly ? (4 + (h % 8)) : (36 + (h % 68)),
+              speed: isBfly ? (18 + (h % 14)) : (62 + (h % 38)),
               sc, phase: (h % 100) * 0.1,
               nextTurnAt: 0.8 + (h % 20) * 0.1,
             });
             cTmp.setHex(cols[(h >> 3) % cols.length]);
             bInst.setColorAt(i, cTmp); wlInst.setColorAt(i, cTmp); wrInst.setColorAt(i, cTmp);
+            if (hInst) hInst.setColorAt(i, cTmp);
           }
-          [bInst, wlInst, wrInst].forEach(im => { if (im.instanceColor) im.instanceColor.needsUpdate = true; staticGrp.add(im); });
-          _outdoorFauna.push({ kind, inst: bInst, wingL: wlInst, wingR: wrInst, items, perches });
+          [bInst, wlInst, wrInst, hInst].filter(Boolean).forEach(im => { if (im.instanceColor) im.instanceColor.needsUpdate = true; staticGrp.add(im); });
+          _outdoorFauna.push({ kind, inst: bInst, wingL: wlInst, wingR: wrInst, head: hInst, items, perches });
         };
 
-        const _spawnFauna = (kind, geo, mat, count, cols, rMin, rMax, scMin, scMax) => {
-          const im = new THREE.InstancedMesh(geo, mat, count);
-          im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-          im.castShadow = true; im.receiveShadow = true;
-          im.frustumCulled = false;
-          im.userData.isDynamic = true;
-          const items = [];
-          const cTmp = new THREE.Color();
+        const _spawnArticulatedGround = (kind, partGeos, mat, count, cols, rMin, rMax, scMin, scMax) => {
+          const mkIM = g => {
+            const im = new THREE.InstancedMesh(g, mat, count);
+            im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            im.castShadow = true; im.receiveShadow = true;
+            im.frustumCulled = false; im.userData.isDynamic = true;
+            return im;
+          };
+          const bInst = mkIM(partGeos.body);
+          const partInsts = {};
+          for (const [pk, pg] of Object.entries(partGeos)) {
+            if (pk !== 'body' && pg) partInsts[pk] = mkIM(pg);
+          }
+          const items = [], cTmp = new THREE.Color();
+          const allInsts = [bInst, ...Object.values(partInsts)];
           for (let i = 0; i < count; i++) {
             const h = ((i * 2654435761 + seedNum * 271 + count * 41) >>> 0);
             const ang = (h % 6283) * 0.001;
@@ -848,34 +1044,257 @@
               phase: (h % 100) * 0.1,
             });
             cTmp.setHex(cols[(h >> 3) % cols.length]);
-            im.setColorAt(i, cTmp);
+            allInsts.forEach(im => im.setColorAt(i, cTmp));
           }
-          if (im.instanceColor) im.instanceColor.needsUpdate = true;
-          staticGrp.add(im);
-          _outdoorFauna.push({ kind, inst: im, items });
+          allInsts.forEach(im => { if (im.instanceColor) im.instanceColor.needsUpdate = true; staticGrp.add(im); });
+          _outdoorFauna.push({ kind, inst: bInst, parts: partInsts, items });
         };
-        const rabCols = isSnowBiome ? [0xe4e2de, 0xc8ccd0, 0xb8a898] : [0x9c7656, 0x86847e, 0xc2a278, 0x76563c, 0xd4cec4];
-        const foxCols = isSnowBiome ? [0xe4e4e8, 0xb8bec6, 0xc8a47c] : [0xc65e2c, 0x8c8682, 0xd4843c, 0x6e442c];
-        const birdCols = [0x383e46, 0x6e523c, 0x4c749e, 0x8c4c3c, 0xc8c4bc];
-        const bflyCols = [0xe88a2e, 0x4ca4e8, 0xe8c43c, 0xe492b8, 0xebe6d8];
-        const bflyPerches = flowerSpots.length ? flowerSpots : birdPerches;
-        _spawnFauna('rabbit', rabbitGeo, _fMat('land_rab_mat_v1', { color: 0xe6ddd4, pbrKind: 'fur', roughness: 0.82, sheen: 0.74, vertexColors: true }), 22, rabCols, 145, 920, 0.78, 1.25);
-        _spawnFauna('fox', foxGeo, _fMat('land_fox_mat_v1', { color: 0xe6dcd2, pbrKind: 'fur', roughness: 0.78, sheen: 0.76, vertexColors: true }), 16, foxCols, 165, 1100, 0.80, 1.22);
-        _spawnArticulatedFliers('bird', birdBodyGeo, birdWingLGeo, birdWingRGeo, _fMat('land_bird_mat_v1', { color: 0xdcdad4, pbrKind: 'cloth', roughness: 0.74, sheen: 0.55, vertexColors: true }), 32, birdCols, 0.90, 1.42, birdPerches);
-        _spawnArticulatedFliers('butterfly', bflyBodyGeo, bflyWingLGeo, bflyWingRGeo, _fMat('land_bfly_mat_v1', { color: 0xf0ece6, pbrKind: 'crystal', roughness: 0.34, side: THREE.DoubleSide, vertexColors: true }), 36, bflyCols, 0.70, 1.38, bflyPerches);
 
-        const _faunaState = { cohorts: _outdoorFauna, getTerrainHeight };
+        const _buildSkyDragon = () => {
+          const dRoot = new THREE.Group();
+          dRoot.userData.isDynamic = true;
+          dRoot.userData.mountCommand = 'sky_dragon';
+          dRoot.userData.hoverInfo = {
+            name: 'Ignis-Vael, Sky Dragon',
+            tag: 'Mountable',
+            tagClass: 'tag-character',
+            detail: "Ancient fire-breathing drake — Click or type 'mount dragon' to ride & unleash fire!",
+          };
+          const dHitbox = new THREE.Mesh(
+            new THREE.SphereGeometry(14, 10, 8),
+            new THREE.MeshBasicMaterial({ visible: false })
+          );
+          dHitbox.position.set(0, 1.5, 1.5);
+          dRoot.add(dHitbox);
+          const scaleMat = _fMat('sky_dragon_scale_v2', { color: 0xb8241e, pbrKind: 'leather', roughness: 0.38, metalness: 0.28, sheen: 0.5, vertexColors: true });
+          const bellyMat = _fMat('sky_dragon_belly_v2', { color: 0xeba834, pbrKind: 'leather', roughness: 0.44, metalness: 0.26, vertexColors: true });
+          const hornMat = _fMat('sky_dragon_horn_v2', { color: 0x2e1f3a, pbrKind: 'stone', roughness: 0.38, metalness: 0.22 });
+          const wingMemMat = _fMat('sky_dragon_wing_v2', { color: 0xe05224, pbrKind: 'cloth', roughness: 0.50, emissive: 0x3b0f05, emissiveIntensity: 0.35, side: THREE.DoubleSide, vertexColors: true });
+          const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
+          const throatMat = new THREE.MeshBasicMaterial({ color: 0xff9220 });
+
+          const torsoGeo = _scLathe
+            ? _scLathe([[1.8, -11], [4.6, -4], [5.8, 3], [5.0, 9], [2.4, 12]], 14).rotateX(Math.PI * 0.5)
+            : new THREE.CylinderGeometry(3.8, 4.8, 22, 12).rotateX(Math.PI * 0.5);
+          _tintVerts(torsoGeo, (_, y) => y < 0 ? [0.95, 0.72, 0.42] : [0.92, 0.86, 0.84]);
+          const torsoM = new THREE.Mesh(torsoGeo, scaleMat);
+          torsoM.scale.set(0.88, 0.92, 1.0); torsoM.castShadow = true;
+          dRoot.add(torsoM);
+
+          const chestPlate = new THREE.Mesh(new THREE.SphereGeometry(4.4, 12, 8).scale(0.82, 0.75, 1.55), bellyMat);
+          chestPlate.position.set(0, -1.6, 2.5);
+          dRoot.add(chestPlate);
+
+          for (let si = 0; si < 5; si++) {
+            const sp = new THREE.Mesh(new THREE.ConeGeometry(0.65, 2.8, 6), hornMat);
+            sp.position.set(0, 4.6 - Math.abs(si - 2) * 0.35, 6.5 - si * 3.8);
+            sp.rotation.x = -0.45; dRoot.add(sp);
+          }
+
+          // Sinuous 2-joint neck + horned skull + articulated fire jaw
+          const neck0 = new THREE.Group(); neck0.position.set(0, 1.4, 10.2);
+          const n0M = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.9, 9.0, 12).rotateX(Math.PI * 0.5).translate(0, 0, 4.2), scaleMat);
+          neck0.add(n0M);
+          const neck1 = new THREE.Group(); neck1.position.set(0, 0.8, 8.2);
+          const n1M = new THREE.Mesh(new THREE.CylinderGeometry(1.75, 2.25, 8.0, 12).rotateX(Math.PI * 0.5).translate(0, 0, 3.8), scaleMat);
+          neck1.add(n1M);
+          const headGrp = new THREE.Group(); headGrp.position.set(0, 0.4, 7.6);
+          const cranium = new THREE.Mesh(new THREE.SphereGeometry(2.3, 12, 9).scale(0.95, 0.82, 1.45), scaleMat);
+          cranium.position.set(0, 0.6, 1.5);
+          const upperJaw = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.75, 4.8, 10).rotateX(Math.PI * 0.5), scaleMat);
+          upperJaw.scale.set(0.95, 0.65, 1.0); upperJaw.position.set(0, 0.35, 4.4);
+          headGrp.add(cranium, upperJaw);
+          [-1, 1].forEach(s => {
+            const horn = new THREE.Mesh(new THREE.ConeGeometry(0.58, 6.8, 8).rotateX(-1.12).rotateZ(-s * 0.35), hornMat);
+            horn.position.set(s * 1.45, 2.2, -1.6); headGrp.add(horn);
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.38, 8, 6), eyeMat);
+            eye.position.set(s * 1.38, 1.05, 3.0); headGrp.add(eye);
+          });
+          const jawPivot = new THREE.Group(); jawPivot.position.set(0, -0.35, 1.6);
+          const lowerJaw = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 1.35, 4.2, 8).rotateX(Math.PI * 0.5), bellyMat);
+          lowerJaw.scale.set(0.92, 0.52, 1.0); lowerJaw.position.set(0, -0.35, 2.4);
+          const throatCore = new THREE.Mesh(new THREE.SphereGeometry(0.95, 8, 6), throatMat);
+          throatCore.position.set(0, 0.1, 1.5); throatCore.visible = false;
+          const mouthEmit = new THREE.Object3D(); mouthEmit.position.set(0, 0.1, 4.5);
+          const fireLight = new THREE.PointLight(0xff7220, 0, 440, 1.2);
+          fireLight.position.set(0, -1.2, 5.5);
+          jawPivot.add(lowerJaw, throatCore);
+          headGrp.add(jawPivot, mouthEmit, fireLight);
+          neck1.add(headGrp); neck0.add(neck1); dRoot.add(neck0);
+
+          // 3-segment sinuous whip tail + spade fin
+          const tailSegs = [];
+          let tParent = dRoot;
+          for (let ti = 0; ti < 3; ti++) {
+            const tp = new THREE.Group();
+            tp.position.set(0, ti === 0 ? 0.6 : 0, ti === 0 ? -10.5 : -9.2);
+            const r1 = 2.1 - ti * 0.55, r2 = 1.5 - ti * 0.50;
+            const tm = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, 9.6, 10).rotateX(Math.PI * 0.5).translate(0, 0, -4.6), scaleMat);
+            tp.add(tm);
+            if (ti === 2) {
+              const finSh = new THREE.Shape();
+              finSh.moveTo(0, 0); finSh.quadraticCurveTo(3.2, -1.8, 0.4, -5.8); finSh.lineTo(0, -4.8);
+              finSh.lineTo(-0.4, -5.8); finSh.quadraticCurveTo(-3.2, -1.8, 0, 0);
+              const finM = new THREE.Mesh(new THREE.ShapeGeometry(finSh, 8).rotateX(-Math.PI * 0.5), wingMemMat);
+              finM.position.set(0, 0.1, -8.5); tp.add(finM);
+            }
+            tParent.add(tp); tailSegs.push(tp); tParent = tp;
+          }
+
+          // Huge 2-joint swept bat-wings (~82u wingspan)
+          const _mkDragonWing = (s) => {
+            const wIn = new THREE.Group(); wIn.position.set(s * 3.8, 2.6, 4.0);
+            const sparIn = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 1.05, 17.5, 8).rotateZ(s * Math.PI * 0.5).translate(s * 8.6, 0, 0.6), scaleMat);
+            const mInSh = new THREE.Shape();
+            mInSh.moveTo(0, 0.6); mInSh.lineTo(s * 17.2, 1.4); mInSh.lineTo(s * 16.5, -10.5);
+            mInSh.quadraticCurveTo(s * 8.0, -7.2, 0, -10.8); mInSh.closePath();
+            const mInG = new THREE.ShapeGeometry(mInSh, 8).rotateX(-Math.PI * 0.5).toNonIndexed();
+            _tintVerts(mInG, x => { const u = Math.min(1, Math.abs(x) / 18); return [0.95 - u * 0.15, 0.72 + u * 0.08, 0.62]; });
+            const mIn = new THREE.Mesh(mInG, wingMemMat);
+            wIn.add(sparIn, mIn);
+
+            const wOut = new THREE.Group(); wOut.position.set(s * 17.0, 0, 1.2);
+            const spur = new THREE.Mesh(new THREE.ConeGeometry(0.42, 2.8, 6).rotateX(Math.PI * 0.5), hornMat);
+            spur.position.set(0, 0.2, 1.6); wOut.add(spur);
+            const leadSpar = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.72, 24.5, 8).rotateZ(s * Math.PI * 0.5).rotateY(s * -0.22).translate(s * 11.8, 0, -2.5), scaleMat);
+            wOut.add(leadSpar);
+            const mOutSh = new THREE.Shape();
+            mOutSh.moveTo(0, 0.4); mOutSh.lineTo(s * 23.8, -5.2);
+            mOutSh.quadraticCurveTo(s * 16.5, -10.5, s * 11.5, -14.8);
+            mOutSh.quadraticCurveTo(s * 6.5, -10.5, 0, -11.5); mOutSh.closePath();
+            const mOutG = new THREE.ShapeGeometry(mOutSh, 10).rotateX(-Math.PI * 0.5).toNonIndexed();
+            _tintVerts(mOutG, x => { const u = Math.min(1, Math.abs(x) / 24); return [0.98 - u * 0.22, 0.76 - u * 0.10, 0.64]; });
+            const mOut = new THREE.Mesh(mOutG, wingMemMat);
+            wOut.add(mOut); wIn.add(wOut); dRoot.add(wIn);
+            return { wIn, wOut };
+          };
+          const wL = _mkDragonWing(-1), wR = _mkDragonWing(1);
+
+          // 4 Articulated clawed legs
+          const dLegs = [[-3.2, 5.2], [3.2, 5.2], [-3.0, -5.4], [3.0, -5.4]].map(([lx, lz]) => {
+            const lp = new THREE.Group(); lp.position.set(lx, -2.4, lz);
+            const lm = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.48, 5.8, 8).rotateX(-0.55).translate(0, -2.2, -1.2), scaleMat);
+            const claw = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.4, 6).rotateX(-0.85).translate(0, -4.6, -2.4), hornMat);
+            lp.add(lm, claw); dRoot.add(lp); return lp;
+          });
+
+          // Fire Breath Instanced Particle Pool (56 additive glow puffs)
+          const fireCount = 56;
+          const fireGeo = new THREE.IcosahedronGeometry(1.15, 1);
+          const fireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.94, blending: THREE.AdditiveBlending, depthWrite: false });
+          const fireInst = new THREE.InstancedMesh(fireGeo, fireMat, fireCount);
+          fireInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+          fireInst.frustumCulled = false; fireInst.userData.isDynamic = true;
+          const fireParts = [], fZero = new THREE.Matrix4().makeScale(0, 0, 0);
+          for (let fi = 0; fi < fireCount; fi++) {
+            fireInst.setMatrixAt(fi, fZero);
+            fireInst.setColorAt(fi, new THREE.Color(0xff9a24));
+            fireParts.push({ active: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 0.9 });
+          }
+          if (fireInst.instanceColor) fireInst.instanceColor.needsUpdate = true;
+
+          // Persistent Multi-Layer Fire Burning + Billowing Rising Smoke System (pooled zero-alloc)
+          const maxSites = 8, flameCount = 96, smokeCount = 112;
+          const emberGeo = new THREE.CylinderGeometry(1.0, 1.15, 0.35, 16);
+          const emberMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.88, depthWrite: false });
+          const emberInst = new THREE.InstancedMesh(emberGeo, emberMat, maxSites);
+          emberInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage); emberInst.frustumCulled = false; emberInst.userData.isDynamic = true;
+
+          const flameGeo = (window._sculptHelpers && window._sculptHelpers.flame)
+            ? window._sculptHelpers.flame(1.0, 2.75, 5) : new THREE.ConeGeometry(0.95, 3.0, 7).translate(0, 1.4, 0);
+          const flameMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.90, blending: THREE.AdditiveBlending, depthWrite: false });
+          const flameInst = new THREE.InstancedMesh(flameGeo, flameMat, flameCount);
+          flameInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage); flameInst.frustumCulled = false; flameInst.userData.isDynamic = true;
+
+          const smokeGeo = new THREE.IcosahedronGeometry(1.35, 1);
+          const smokeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0.0, transparent: true, opacity: 0.44, depthWrite: false });
+          const smokeInst = new THREE.InstancedMesh(smokeGeo, smokeMat, smokeCount);
+          smokeInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage); smokeInst.frustumCulled = false; smokeInst.userData.isDynamic = true;
+
+          const fireSites = [];
+          for (let si = 0; si < maxSites; si++) {
+            emberInst.setMatrixAt(si, fZero);
+            emberInst.setColorAt(si, new THREE.Color(0x2a140a));
+            fireSites.push({ active: false, x: 0, y: 0, z: 0, age: 0, life: 18, radius: 14 });
+          }
+          const siteFlames = Array.from({ length: flameCount }, (_, i) => ({ phase: i * 1.37, ox: Math.cos(i * 2.4) * 0.65, oz: Math.sin(i * 2.4) * 0.65 }));
+          const smokeParts = Array.from({ length: smokeCount }, () => { return { active: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, life: 3.2, sc: 1 }; });
+          for (let fi = 0; fi < flameCount; fi++) { flameInst.setMatrixAt(fi, fZero); flameInst.setColorAt(fi, new THREE.Color(0xff9224)); }
+          for (let sm = 0; sm < smokeCount; sm++) { smokeInst.setMatrixAt(sm, fZero); smokeInst.setColorAt(sm, new THREE.Color(0x464a52)); }
+          [emberInst, flameInst, smokeInst].forEach(im => { if (im.instanceColor) im.instanceColor.needsUpdate = true; });
+          const burnLight = new THREE.PointLight(0xff7420, 0, 320, 1.25);
+
+          staticGrp.add(dRoot, fireInst, emberInst, flameInst, smokeInst, burnLight);
+          return {
+            root: dRoot, neck0, neck1, headGrp, jawPivot, throatCore, mouthEmit, fireLight, tailSegs, wL, wR, dLegs,
+            fireInst, fireParts, fireIdx: 0, emitAcc: 0, t: (seedNum % 628) * 0.01,
+            mode: 'soar', modeTimer: 0, cycleTime: 0, forcedBreathUntil: 0,
+            posX: 0, posY: 145, posZ: 0, yaw: 0, landX: -145, landZ: 120,
+            emberInst, flameInst, smokeInst, fireSites, siteFlames, smokeParts, smokeIdx: 0, smokeAcc: 0, burnLight,
+          };
+        };
+
+        const rabCols = isSnowBiome ? [0xe8e6e2, 0xcad0d6, 0xb8a898] : [0x9c7656, 0x86847e, 0xc2a278, 0x76563c, 0xd4cec4];
+        const foxCols = isSnowBiome ? [0xe4e8f0, 0xb8bec6, 0xc8a47c] : [0xd95f24, 0x8c8682, 0xe88d34, 0x6e442c];
+        const birdCols = [0x3b82f6, 0xc95a38, 0xf3ba2f, 0x38bdf8, 0x8b5cf6, 0x475569];
+        const bflyCols = [0xff7b25, 0x00bbf9, 0xfee440, 0xf15bb5, 0x9b5de5, 0x80ed99];
+        const bflyPerches = flowerSpots.length ? flowerSpots : birdPerches;
+        _spawnArticulatedGround('rabbit', { body: rabbitBodyGeo, head: rabbitHeadGeo, legF: rabbitLegFGeo, legH: rabbitLegHGeo }, _fMat('land_rab_mat_v2', { color: 0xe6ddd4, pbrKind: 'fur', roughness: 0.82, sheen: 0.74, vertexColors: true }), 11, rabCols, 145, 920, 0.78, 1.25);
+        _spawnArticulatedGround('fox', { body: foxBodyGeo, head: foxHeadGeo, tail: foxTailGeo, legA: foxLegAGeo, legB: foxLegBGeo }, _fMat('land_fox_mat_v2', { color: 0xe6dcd2, pbrKind: 'fur', roughness: 0.78, sheen: 0.76, vertexColors: true }), 8, foxCols, 165, 1100, 0.80, 1.22);
+        _spawnArticulatedFliers('bird', birdBodyGeo, birdWingLGeo, birdWingRGeo, birdHeadGeo, _fMat('land_bird_mat_v2', { color: 0xdcdad4, pbrKind: 'cloth', roughness: 0.74, sheen: 0.55, side: THREE.DoubleSide, vertexColors: true }), 16, birdCols, 0.92, 1.42, birdPerches);
+        _spawnArticulatedFliers('butterfly', bflyBodyGeo, bflyWingLGeo, bflyWingRGeo, null, _fMat('land_bfly_mat_v2', { color: 0xf8f4ee, pbrKind: 'crystal', roughness: 0.30, side: THREE.DoubleSide, vertexColors: true }), 18, bflyCols, 0.70, 1.25, bflyPerches);
+
+        // 4 Climbable 3D Wooden Lookout Ladders around the valley
+        const climbableLadders = [];
+        const _ladWood = _fMat('lad_wood_mat_v1', { color: 0x8c5c34, pbrKind: 'wood', roughness: 0.82 });
+        const _ladTrim = _fMat('lad_brass_mat_v1', { color: 0xd9a83e, pbrKind: 'metal', roughness: 0.34, metalness: 0.82 });
+        const _ladRailGeo = _geo('lad_rail_v1', () => new THREE.CylinderGeometry(0.45, 0.52, 46, 8));
+        const _ladRungGeo = _geo('lad_rung_v1', () => new THREE.CylinderGeometry(0.32, 0.32, 8.6, 8).rotateZ(Math.PI * 0.5));
+        const _ladCapGeo = _geo('lad_cap_v1', () => new THREE.SphereGeometry(0.72, 8, 6));
+        [[142, 118, -0.5], [178, 134, -0.4], [-182, 138, 0.5], [195, -148, -2.4], [-158, -162, 2.5]].forEach(([lx, lz, lYaw], li) => {
+          const gy = getTerrainHeight(lx, lz);
+          if (li > 0 && hasHardRoomCenter && Math.hypot(lx / (W * 0.5), lz / (H * 0.5)) < 0.85) return;
+          const lg = new THREE.Group();
+          lg.position.set(lx, gy, lz);
+          lg.rotation.set(0.08, lYaw, 0);
+          [-3.8, 3.8].forEach(rx => {
+            const rail = new THREE.Mesh(_ladRailGeo, _ladWood); rail.position.set(rx, 23, 0); rail.castShadow = true; lg.add(rail);
+            const cap = new THREE.Mesh(_ladCapGeo, _ladTrim); cap.position.set(rx, 46.2, 0); lg.add(cap);
+          });
+          for (let ri = 0; ri < 9; ri++) {
+            const rung = new THREE.Mesh(_ladRungGeo, ri % 3 === 0 ? _ladTrim : _ladWood);
+            rung.position.set(0, 4.5 + ri * 4.8, 0); rung.castShadow = true; lg.add(rung);
+          }
+          lg.userData.hoverInfo = { name: `Timber Lookout Ladder #${li + 1}`, tag: 'Climbable', tagClass: 'tag-obstacle', detail: "Use action 'Climb Nearest Ladder' or type 'climb ladder' to ascend!" };
+          staticGrp.add(lg);
+          climbableLadders.push({ x: lx, y: gy, z: lz, topY: gy + 45, yaw: lYaw });
+        });
+        staticGrp.userData.ladders = climbableLadders;
+        window.__climbableLadders = climbableLadders;
+
+        const _skyDragon = _buildSkyDragon();
+
+        const _faunaState = { cohorts: _outdoorFauna, dragon: _skyDragon, getTerrainHeight };
         staticGrp.userData.outdoorFaunaState = _faunaState;
         window.__outdoorFaunaState = _faunaState;
         {
           const _fDum = new THREE.Object3D(), _wDum = new THREE.Object3D(), _wMat = new THREE.Matrix4();
+          const _dPos = new THREE.Vector3(), _dDir = new THREE.Vector3(), _dQuat = new THREE.Quaternion(), _dCol = new THREE.Color();
           const _pickNextPerch = (a, ch, isBfly) => {
             const pArr = ch.perches;
             const pick = pArr[Math.floor((a.phase * 137.5 + performance.now() * 0.017) % pArr.length)] || pArr[0];
             a.tx = pick.x + ((isBfly || pick.kind === 'ground') ? 0 : (Math.sin(a.phase * 5) * 3));
             a.tz = pick.z + ((isBfly || pick.kind === 'ground') ? 0 : (Math.cos(a.phase * 7) * 3));
-            a.ty = pick.y + (isBfly ? 8.1 * (pick.sc || 1) : 0);
+            a.ty = pick.y + (isBfly ? 7.8 * (pick.sc || 1) : 0);
             a.targetKind = pick.kind || 'flower';
+          };
+          const _setPart = (im, i, px, py, pz, rx, ry, rz) => {
+            _wDum.position.set(px, py, pz);
+            _wDum.rotation.set(rx, ry, rz);
+            _wDum.scale.setScalar(1);
+            _wDum.updateMatrix();
+            _wMat.multiplyMatrices(_fDum.matrix, _wDum.matrix);
+            im.setMatrixAt(i, _wMat);
           };
           const _stepCohortState = (st, dtSec, nowMs) => {
             if (!st || !st.cohorts) return;
@@ -897,9 +1316,7 @@
                     a.state = 'takeoff';
                     a.timer = isBfly ? 0.65 : 1.05;
                     _pickNextPerch(a, ch, isBfly);
-                    if (startled && pWorld) {
-                      a.yaw = Math.atan2(a.x - pWorld.x, a.z - pWorld.z);
-                    }
+                    if (startled && pWorld) a.yaw = Math.atan2(a.x - pWorld.x, a.z - pWorld.z);
                   } else if (a.state === 'takeoff' && a.timer <= 0) {
                     a.state = 'fly';
                     a.timer = 4.5 + (i % 5);
@@ -911,27 +1328,25 @@
                     a.timer = 5.0;
                   }
 
-                  let rx = 0, rz = 0, wFlap = 0, wFoldY = 0, wDropZ = 0;
+                  let rx = 0, rz = 0, wFlap = 0, wFoldY = 0, wDropZ = 0, hPitch = 0, hYaw = 0;
                   if (a.state === 'perched') {
                     a.x = a.tx; a.y = a.ty; a.z = a.tz;
                     if (isBfly) {
-                      // Slow tranquil basking wing open-and-close atop flower head
-                      wFlap = 0.25 + Math.sin(p * 2.2) * 0.22;
+                      wFlap = 0.28 + Math.sin(p * 2.2) * 0.22;
                     } else {
-                      // Perched wings tucked snugly back against flanks; look around, hop & peck on ground
-                      wFoldY = 1.05; wDropZ = 0.55; wFlap = -0.35;
+                      wFoldY = 1.18; wDropZ = 0.55; wFlap = -0.35;
                       a.nextTurnAt -= dtSec;
                       if (a.nextTurnAt <= 0) {
                         a.nextTurnAt = 0.9 + ((i * 7) % 13) * 0.12;
-                        a.yaw += (Math.sin(p * 3.7) * 0.95);
+                        a.yaw += (Math.sin(p * 3.7) * 0.85);
                       }
+                      hYaw = Math.sin(p * 3.1) * 0.55;
                       if (a.perchKind === 'ground' || a.perchKind === 'log' || a.perchKind === 'rock') {
                         const cycle = p % 2.4;
                         if (cycle < 0.45) {
-                          // Double head-peck toward ground for seeds
-                          rx = Math.abs(Math.sin(cycle * Math.PI * 4.4)) * 0.62;
+                          hPitch = Math.abs(Math.sin(cycle * Math.PI * 4.4)) * 0.72;
+                          rx = hPitch * 0.35;
                         } else if (a.perchKind === 'ground' && cycle > 1.3 && cycle < 1.75) {
-                          // Little ground hop forward along perch
                           const hp = Math.sin(((cycle - 1.3) / 0.45) * Math.PI);
                           a.y += hp * 1.4;
                           a.x += Math.sin(a.yaw) * dtSec * 8;
@@ -950,7 +1365,7 @@
                     a.yaw += turnAmt;
                     const tgtY = a.state === 'land'
                       ? a.ty
-                      : Math.max((st.getTerrainHeight ? st.getTerrainHeight(a.x, a.z) : 0) + (isBfly ? 6 : 22), a.ty + a.cruiseAlt + (isBfly ? Math.sin(p * 3.0) * 3.5 : Math.sin(p * 0.9) * 8));
+                      : Math.max((st.getTerrainHeight ? st.getTerrainHeight(a.x, a.z) : 0) + (isBfly ? 4 : 24), a.ty + a.cruiseAlt + (isBfly ? Math.sin(p * 3.0) * 2.5 : Math.sin(p * 0.9) * 8));
                     const spd = a.speed * (a.state === 'land' ? Math.max(0.20, Math.min(0.95, dist / 36)) : a.state === 'takeoff' ? 0.90 : 1.0);
                     const flutterX = isBfly ? Math.sin(p * 5.2 + i) * 6 * dtSec : 0;
                     if (a.state === 'land' && dist < 16) {
@@ -973,7 +1388,6 @@
                       rx = 0.18 + Math.sin(p * 4.5) * 0.16;
                       rz = -turnAmt * 6.0;
                     } else {
-                      // Natural flight: alternate flapping bursts with soaring glides, flare upward when landing
                       const glideCycle = (p * 0.35 + i * 0.4) % 1.0;
                       const isGliding = a.state === 'fly' && glideCycle > 0.58;
                       wFlap = a.state === 'takeoff'
@@ -981,6 +1395,7 @@
                         : isGliding ? (0.12 + Math.sin(p * 2.0) * 0.04) : (Math.sin(p * 12.0) * 0.65 + 0.08);
                       rx = a.state === 'takeoff' ? -0.34 : (a.state === 'land' ? -0.26 : Math.max(-0.22, Math.min(0.22, (a.y - tgtY) * 0.015)));
                       rz = Math.max(-0.45, Math.min(0.45, -turnAmt * 12.0));
+                      hPitch = -rx * 0.55; hYaw = Math.sin(p * 1.4) * 0.18;
                     }
                   }
                   _fDum.position.set(a.x, a.y, a.z);
@@ -988,47 +1403,436 @@
                   _fDum.scale.setScalar(a.sc);
                   _fDum.updateMatrix();
                   inst.setMatrixAt(i, _fDum.matrix);
+                  if (ch.head) _setPart(ch.head, i, 0, 0.35, 1.45, hPitch, hYaw, 0);
                   const syOff = isBfly ? 0.05 : 0.32;
-                  _wDum.position.set(0, syOff, 0.18);
-                  _wDum.rotation.set(-wDropZ * 0.35, -wFoldY, -wFlap);
-                  _wDum.scale.setScalar(1);
-                  _wDum.updateMatrix();
-                  _wMat.multiplyMatrices(_fDum.matrix, _wDum.matrix);
-                  ch.wingL.setMatrixAt(i, _wMat);
-                  _wDum.rotation.set(-wDropZ * 0.35, wFoldY, wFlap);
-                  _wDum.updateMatrix();
-                  _wMat.multiplyMatrices(_fDum.matrix, _wDum.matrix);
-                  ch.wingR.setMatrixAt(i, _wMat);
+                  _setPart(ch.wingL, i, 0, syOff, 0.18, -wDropZ * 0.35, -wFoldY, -wFlap);
+                  _setPart(ch.wingR, i, 0, syOff, 0.18, -wDropZ * 0.35, wFoldY, wFlap);
                 }
                 inst.instanceMatrix.needsUpdate = true;
                 ch.wingL.instanceMatrix.needsUpdate = true;
                 ch.wingR.instanceMatrix.needsUpdate = true;
+                if (ch.head) ch.head.instanceMatrix.needsUpdate = true;
                 continue;
               }
+              const pts = ch.parts || {};
               for (let i = 0; i < items.length; i++) {
                 const a = items[i];
+                const isDead = a.deadUntil && nowMs < a.deadUntil;
+                if (isDead) {
+                  const sinceKill = (nowMs - (a.killedAt || nowMs)) * 0.001;
+                  const fadeSc = sinceKill > 3.0 ? Math.max(0, 1.0 - (sinceKill - 3.0) * 0.8) : 1.0;
+                  const gyD = st.getTerrainHeight ? st.getTerrainHeight(a.lastWx || a.cx, a.lastWz || a.cz) : 0;
+                  _fDum.position.set(a.lastWx || a.cx, gyD + 0.6, a.lastWz || a.cz);
+                  _fDum.rotation.set(0, a.lastYaw || 0, Math.PI * 0.48);
+                  _fDum.scale.setScalar(a.sc * fadeSc);
+                  _fDum.updateMatrix();
+                  inst.setMatrixAt(i, _fDum.matrix);
+                  Object.values(pts).forEach(pm => pm.setMatrixAt(i, _fDum.matrix));
+                  continue;
+                }
                 const p = nowMs * 0.008 + a.phase;
-                const rabPause = (kind === 'rabbit') && (((p * 0.14) % 1.0) > 0.74);
+                const rabPause = (kind === 'rabbit') && (((p * 0.14) % 1.0) > 0.72);
                 if (!rabPause) a.a += a.speed * dtSec;
                 const wx = a.cx + Math.cos(a.a) * a.loopR;
                 const wz = a.cz + Math.sin(a.a) * a.loopR * 0.78;
                 const dx = -Math.sin(a.a) * a.loopR * a.speed;
                 const dz = Math.cos(a.a) * a.loopR * 0.78 * a.speed;
+                const yaw = Math.atan2(dx, dz);
+                a.lastWx = wx; a.lastWz = wz; a.lastYaw = yaw;
                 const gy = st.getTerrainHeight ? st.getTerrainHeight(wx, wz) : 0;
                 let y = gy, rx = 0, rz = 0;
                 if (kind === 'rabbit') {
-                  if (rabPause) { rx = Math.abs(Math.sin(p * 2.2)) * 0.25; }
-                  else { const hop = Math.abs(Math.sin(p * 1.1)); y = gy + hop * 2.6; rx = -Math.cos(p * 1.1) * 0.16; }
+                  if (rabPause) { rx = Math.abs(Math.sin(p * 2.2)) * 0.16; }
+                  else { const hop = Math.abs(Math.sin(p * 1.1)); y = gy + hop * 2.8; rx = -Math.cos(p * 1.1) * 0.22; }
                 } else if (kind === 'fox') {
-                  y = gy + Math.abs(Math.sin(p * 0.9)) * 0.65;
+                  y = gy + Math.abs(Math.sin(p * 1.9)) * 0.70;
                 }
                 _fDum.position.set(wx, y, wz);
-                _fDum.rotation.set(rx, Math.atan2(dx, dz), rz);
+                _fDum.rotation.set(rx, yaw, rz);
                 _fDum.scale.setScalar(a.sc);
                 _fDum.updateMatrix();
                 inst.setMatrixAt(i, _fDum.matrix);
+                if (kind === 'rabbit') {
+                  const hNod = rabPause ? (0.42 + Math.sin(p * 3.8) * 0.22) : (-0.10 + Math.sin(p * 1.1) * 0.14);
+                  const hTurn = rabPause ? Math.sin(p * 1.6) * 0.45 : Math.sin(p * 0.7) * 0.12;
+                  const fKick = rabPause ? 0 : Math.sin(p * 1.1) * 0.65;
+                  if (pts.head) _setPart(pts.head, i, 0, 3.2, 1.8, hNod, hTurn, 0);
+                  if (pts.legF) _setPart(pts.legF, i, 0, 1.7, 1.4, -fKick, 0, 0);
+                  if (pts.legH) _setPart(pts.legH, i, 0, 1.6, -1.6, fKick * 1.1, 0, 0);
+                } else if (kind === 'fox') {
+                  const stride = Math.sin(p * 2.6) * 0.58;
+                  if (pts.head) _setPart(pts.head, i, 0, 4.4, 3.6, 0.08 + Math.sin(p * 1.1) * 0.18, Math.sin(p * 0.85) * 0.32, 0);
+                  if (pts.tail) _setPart(pts.tail, i, 0, 4.0, -4.1, -0.32 + Math.sin(p * 1.9) * 0.12, Math.sin(p * 2.3) * 0.45, 0);
+                  if (pts.legA) _setPart(pts.legA, i, 0, 3.4, 0, stride, 0, 0);
+                  if (pts.legB) _setPart(pts.legB, i, 0, 3.4, 0, -stride, 0, 0);
+                }
               }
               inst.instanceMatrix.needsUpdate = true;
+              Object.values(pts).forEach(pm => { pm.instanceMatrix.needsUpdate = true; });
+            }
+            // Step Landable / Mountable Fire-Breathing Dragon + Persistent Fire Burning & Smoke
+            const dr = st.dragon;
+            const _igniteSite = (ix, iz, rad = 14, dur = 18) => {
+              if (!dr || !dr.fireSites) return;
+              const igy = st.getTerrainHeight ? st.getTerrainHeight(ix, iz) : 0;
+              let bestSlot = null, bestDist = 20;
+              for (let si = 0; si < dr.fireSites.length; si++) {
+                const fs = dr.fireSites[si];
+                if (fs.active) {
+                  const d = Math.hypot(fs.x - ix, fs.z - iz);
+                  if (d < bestDist) { bestDist = d; bestSlot = fs; }
+                }
+              }
+              if (bestSlot) {
+                bestSlot.age = 0; bestSlot.life = Math.max(bestSlot.life, dur); bestSlot.radius = Math.max(bestSlot.radius, rad);
+                return;
+              }
+              const freeSlot = dr.fireSites.find(s => !s.active) || dr.fireSites.reduce((a, b) => (a.age > b.age ? a : b));
+              freeSlot.active = true; freeSlot.x = ix; freeSlot.y = igy; freeSlot.z = iz;
+              freeSlot.age = 0; freeSlot.life = dur; freeSlot.radius = rad;
+            };
+            if (dr && dr.root && dr.root.parent) {
+              const nowS = nowMs * 0.001;
+              dr.cycleTime += dtSec;
+              const _pathPos = tt => {
+                const px = Math.sin(tt) * 320 + Math.cos(tt * 0.5) * 70;
+                const pz = Math.sin(tt * 2.0) * 200;
+                const gy = st.getTerrainHeight ? st.getTerrainHeight(px, pz) : 0;
+                const py = Math.max(gy + 105, 128 + Math.sin(tt * 1.7) * 24);
+                return [px, py, pz];
+              };
+              let rx = 0, rz = 0, beatSpeed = 3.8, wingFold = 0, isMovingFwd = true, isBreathing = nowMs < (dr.forcedBreathUntil || 0);
+              if (dr.mode === 'ridden') {
+                const curPx = (typeof renderPlayerPos !== 'undefined' && renderPlayerPos.initialized) ? (renderPlayerPos.x - 512) : ((typeof lastPlayerPos !== 'undefined') ? (lastPlayerPos.x - 512) : 0);
+                const curPz = (typeof renderPlayerPos !== 'undefined' && renderPlayerPos.initialized) ? (renderPlayerPos.y - 384) : ((typeof lastPlayerPos !== 'undefined') ? (lastPlayerPos.y - 384) : 0);
+                const gy = st.getTerrainHeight ? st.getTerrainHeight(curPx, curPz) : 0;
+                const elev = (typeof window.__lwLocalElevation === 'number') ? window.__lwLocalElevation : 0;
+                const airFrac = Math.min(1, elev / 14.0);
+                const tgtY = gy + 5.6 + elev;
+                const mvSpd = Math.hypot(curPx - dr.posX, curPz - dr.posZ) / Math.max(0.01, dtSec);
+                isMovingFwd = mvSpd > 2.5;
+                if (typeof cameraMode !== 'undefined' && cameraMode === 'tp' && typeof tpYawOffset === 'number' && isMovingFwd) {
+                  dr.yaw = Math.atan2(curPx - dr.posX, curPz - dr.posZ);
+                } else if (typeof facingToVec === 'function' && typeof lastFacing === 'string') {
+                  const [fdx, fdz] = facingToVec(lastFacing);
+                  dr.yaw = Math.atan2(fdx, fdz);
+                }
+                dr.posX = curPx; dr.posZ = curPz; dr.posY = tgtY;
+                wingFold = (1.0 - airFrac) * 0.88;
+                rx = airFrac * (isMovingFwd ? -0.10 : 0.04);
+                rz = airFrac * (Math.sin(nowS * 2.0) * 0.08);
+                beatSpeed = airFrac > 0.2 ? 4.4 : 0.9;
+                dr.root.position.set(dr.posX, dr.posY, dr.posZ);
+                dr.root.rotation.set(rx, dr.yaw, rz);
+              } else if (dr.mode === 'soar') {
+                dr.t += dtSec * 0.28;
+                const [cx, cy, cz] = _pathPos(dr.t);
+                const [nx, ny, nz] = _pathPos(dr.t + 0.02);
+                dr.posX = cx; dr.posY = cy; dr.posZ = cz;
+                dr.yaw = Math.atan2(nx - cx, nz - cz);
+                rx = -Math.atan2(ny - cy, Math.hypot(nx - cx, nz - cz) || 1);
+                rz = -Math.sin(dr.t * 2.0) * 0.34;
+                isBreathing = isBreathing || ((dr.cycleTime % 7.5) >= 1.5 && (dr.cycleTime % 7.5) <= 4.1);
+                if (dr.cycleTime >= 7.0) {
+                  dr.mode = 'descend'; dr.modeTimer = 0;
+                  const pX = (typeof lastPlayerPos !== 'undefined') ? (lastPlayerPos.x - 512) : 0;
+                  const pZ = (typeof lastPlayerPos !== 'undefined') ? (lastPlayerPos.y - 384) : 0;
+                  dr.landX = pX + Math.cos(nowS * 0.7) * 105; dr.landZ = pZ + Math.sin(nowS * 0.7) * 105;
+                }
+                dr.root.position.set(dr.posX, dr.posY, dr.posZ);
+                dr.root.rotation.set(rx, dr.yaw, rz);
+              } else if (dr.mode === 'descend') {
+                dr.modeTimer += dtSec;
+                const gy = st.getTerrainHeight ? st.getTerrainHeight(dr.landX, dr.landZ) : 0;
+                const tgtY = gy + 5.6;
+                const lerpK = 1 - Math.exp(-1.5 * dtSec);
+                const odx = dr.landX - dr.posX, odz = dr.landZ - dr.posZ;
+                if (Math.hypot(odx, odz) > 6) dr.yaw = Math.atan2(odx, odz);
+                dr.posX += odx * lerpK; dr.posZ += odz * lerpK; dr.posY += (tgtY - dr.posY) * lerpK;
+                const remainAlt = Math.max(0, dr.posY - tgtY);
+                wingFold = Math.max(0, 1.0 - remainAlt / 28.0) * 0.92;
+                rx = Math.min(0.26, remainAlt * 0.008);
+                isMovingFwd = remainAlt > 4;
+                dr.root.position.set(dr.posX, dr.posY, dr.posZ);
+                dr.root.rotation.set(rx, dr.yaw, rz * 0.2);
+                if (Math.hypot(odx, odz) < 12 && remainAlt < 1.6) {
+                  dr.mode = 'landed'; dr.modeTimer = 0; dr.posY = tgtY;
+                }
+              } else if (dr.mode === 'landed') {
+                dr.modeTimer += dtSec;
+                const gy = st.getTerrainHeight ? st.getTerrainHeight(dr.landX, dr.landZ) : 0;
+                dr.posY = gy + 5.6 + Math.sin(nowS * 1.9) * 0.25;
+                wingFold = 0.96; isMovingFwd = false;
+                dr.root.position.set(dr.posX, dr.posY, dr.posZ);
+                dr.root.rotation.set(0, dr.yaw, 0);
+                // Occasional gentle fire puff while landed (ignites a nearby campfire blaze once per landing)
+                if (dr.modeTimer > 1.2 && dr.modeTimer < 2.2) isBreathing = true;
+                if (dr.modeTimer > 18.0) { dr.mode = 'takeoff'; dr.modeTimer = 0; }
+              } else if (dr.mode === 'takeoff') {
+                dr.modeTimer += dtSec;
+                const takeF = Math.min(1, dr.modeTimer / 2.6);
+                dr.posY += 56 * dtSec;
+                dr.posX += Math.sin(dr.yaw) * 75 * dtSec; dr.posZ += Math.cos(dr.yaw) * 75 * dtSec;
+                wingFold = (1 - takeF) * 0.92; rx = -0.36; beatSpeed = 5.6;
+                dr.root.position.set(dr.posX, dr.posY, dr.posZ);
+                dr.root.rotation.set(rx, dr.yaw, 0);
+                if (dr.modeTimer >= 2.6) { dr.mode = 'soar'; dr.cycleTime = 0; }
+              }
+
+              // Wings: blend smoothly between full aerial beat and folded landed posture
+              const beat = nowS * beatSpeed;
+              const flyIn = isBreathing ? (0.18 + Math.sin(beat * 0.8) * 0.25) : (0.14 + Math.sin(beat) * 0.56);
+              const flyOut = isBreathing ? (-0.20 + Math.sin(beat * 0.8 - 0.8) * 0.28) : (-0.22 + Math.sin(beat - 0.85) * 0.62);
+              const flapIn = flyIn * (1 - wingFold) + 1.05 * wingFold;
+              const flapOut = flyOut * (1 - wingFold) - 0.88 * wingFold;
+              dr.wL.wIn.rotation.z = flapIn; dr.wL.wOut.rotation.z = flapOut;
+              dr.wR.wIn.rotation.z = -flapIn; dr.wR.wOut.rotation.z = -flapOut;
+
+              const nSway = Math.sin(nowS * 2.2);
+              dr.neck0.rotation.set(isBreathing ? 0.34 : Math.sin(nowS * 1.8) * (wingFold > 0.5 ? 0.06 : 0.12), nSway * (wingFold > 0.5 ? 0.28 : 0.16), 0);
+              dr.neck1.rotation.set(isBreathing ? 0.26 : -Math.sin(nowS * 1.8) * 0.08, -nSway * 0.18, 0);
+              dr.jawPivot.rotation.x = isBreathing ? (0.50 + Math.sin(nowS * 18) * 0.06) : (0.06 + Math.sin(nowS * 1.5) * 0.04);
+              dr.throatCore.visible = isBreathing;
+              dr.fireLight.intensity = isBreathing ? (6.5 + Math.sin(nowS * 24) * 2.0) : 0;
+              dr.tailSegs.forEach((ts, idx) => {
+                ts.rotation.set(Math.cos(nowS * 2.4 - idx * 0.7) * (wingFold > 0.5 ? 0.04 : 0.12), Math.sin(nowS * 2.8 - idx * 0.85) * 0.28, 0);
+              });
+              dr.dLegs.forEach((lp, li) => {
+                if (wingFold > 0.55) {
+                  const walkPh = isMovingFwd ? Math.sin(nowS * 11 + ((li === 0 || li === 3) ? 0 : Math.PI)) * 0.42 : 0;
+                  lp.rotation.x = 0.22 + walkPh;
+                } else {
+                  lp.rotation.x = Math.sin(beat + li * 0.5) * 0.18;
+                }
+              });
+
+              // Fire-breath emission & ground ignition
+              if (isBreathing && dr.fireInst) {
+                dr.root.updateMatrixWorld(true);
+                dr.mouthEmit.getWorldPosition(_dPos);
+                dr.headGrp.getWorldQuaternion(_dQuat);
+                _dDir.set(0, dr.mode === 'landed' || dr.mode === 'ridden' ? -0.45 : -0.35, 1).applyQuaternion(_dQuat).normalize();
+                dr.emitAcc += dtSec * 52;
+                while (dr.emitAcc >= 1) {
+                  dr.emitAcc -= 1;
+                  const fp = dr.fireParts[dr.fireIdx % dr.fireParts.length];
+                  dr.fireIdx++;
+                  const jitterX = (Math.sin(dr.fireIdx * 9.3) * 0.14), jitterY = (Math.cos(dr.fireIdx * 7.1) * 0.14);
+                  fp.active = true; fp.age = 0; fp.life = 0.85 + (dr.fireIdx % 5) * 0.08;
+                  fp.x = _dPos.x; fp.y = _dPos.y; fp.z = _dPos.z;
+                  fp.vx = (_dDir.x + jitterX) * 195;
+                  fp.vy = (_dDir.y + jitterY) * 195;
+                  fp.vz = (_dDir.z + Math.cos(dr.fireIdx * 5.7) * 0.14) * 195;
+                }
+              }
+              if (dr.fireInst) {
+                for (let fi = 0; fi < dr.fireParts.length; fi++) {
+                  const fp = dr.fireParts[fi];
+                  if (!fp.active) continue;
+                  fp.age += dtSec;
+                  if (fp.age >= fp.life) {
+                    fp.active = false;
+                    _fDum.scale.setScalar(0); _fDum.updateMatrix();
+                    dr.fireInst.setMatrixAt(fi, _fDum.matrix);
+                    continue;
+                  }
+                  const fNorm = fp.age / fp.life;
+                  fp.x += fp.vx * dtSec; fp.y += (fp.vy + fNorm * 20) * dtSec; fp.z += fp.vz * dtSec;
+                  const gyHit = st.getTerrainHeight ? st.getTerrainHeight(fp.x, fp.z) : 0;
+                  if (fp.y <= gyHit + 6 && fi % 6 === 0) _igniteSite(fp.x, fp.z, 13, 18);
+                  const fScale = (2.4 + fNorm * 9.6) * (1.0 - fNorm * 0.25);
+                  _fDum.position.set(fp.x, fp.y, fp.z);
+                  _fDum.rotation.set(fp.age * 3, fp.age * 2, 0);
+                  _fDum.scale.setScalar(fScale);
+                  _fDum.updateMatrix();
+                  dr.fireInst.setMatrixAt(fi, _fDum.matrix);
+                  if (fNorm < 0.25) _dCol.setHex(0xfff6be);
+                  else if (fNorm < 0.62) _dCol.setHex(0xff8418);
+                  else _dCol.setHex(0xc42208);
+                  dr.fireInst.setColorAt(fi, _dCol);
+                }
+                dr.fireInst.instanceMatrix.needsUpdate = true;
+                if (dr.fireInst.instanceColor) dr.fireInst.instanceColor.needsUpdate = true;
+              }
+
+              // Update Active Fire Burning Sites (charred ember bed + flickering flame tongues + billowing smoke)
+              if (dr.fireSites && dr.flameInst && dr.smokeInst && dr.emberInst) {
+                let flameCursor = 0, brightSite = null, brightPow = 0;
+                for (let si = 0; si < dr.fireSites.length; si++) {
+                  const fs = dr.fireSites[si];
+                  if (!fs.active) {
+                    _fDum.scale.setScalar(0); _fDum.updateMatrix();
+                    dr.emberInst.setMatrixAt(si, _fDum.matrix);
+                    continue;
+                  }
+                  fs.age += dtSec;
+                  if (fs.age >= fs.life) {
+                    fs.active = false;
+                    _fDum.scale.setScalar(0); _fDum.updateMatrix();
+                    dr.emberInst.setMatrixAt(si, _fDum.matrix);
+                    continue;
+                  }
+                  const fade = fs.age < 0.6 ? (fs.age / 0.6) : (fs.age > fs.life - 3.0 ? Math.max(0, (fs.life - fs.age) / 3.0) : 1.0);
+                  const pulse = (0.86 + Math.sin(nowS * 11 + si * 2.1) * 0.14) * fade;
+                  if (pulse > brightPow) { brightPow = pulse; brightSite = fs; }
+                  _fDum.position.set(fs.x, fs.y + 0.3, fs.z);
+                  _fDum.rotation.set(0, si * 0.9, 0);
+                  _fDum.scale.set(fs.radius * (0.9 + pulse * 0.15), 1, fs.radius * (0.9 + pulse * 0.15));
+                  _fDum.updateMatrix();
+                  dr.emberInst.setMatrixAt(si, _fDum.matrix);
+                  _dCol.setRGB(0.22 + pulse * 0.55, 0.08 + pulse * 0.18, 0.03);
+                  dr.emberInst.setColorAt(si, _dCol);
+
+                  // 12 swirling multi-layer flame tongues per active fire site
+                  for (let ti = 0; ti < 12 && flameCursor < dr.siteFlames.length; ti++) {
+                    const sf = dr.siteFlames[flameCursor];
+                    const ph = nowS * (9.5 + (ti % 4) * 2.1) + sf.phase;
+                    const radFrac = (ti < 4) ? 0.25 : 0.72;
+                    const fx = fs.x + sf.ox * fs.radius * radFrac + Math.sin(ph * 0.8) * 1.4;
+                    const fz = fs.z + sf.oz * fs.radius * radFrac + Math.cos(ph * 0.9) * 1.4;
+                    const fW = (ti < 4 ? 3.2 : 2.2) * fade * (0.8 + Math.sin(ph) * 0.25);
+                    const fH = (ti < 4 ? 7.4 : 4.8) * pulse * (0.82 + Math.sin(ph * 1.3) * 0.28);
+                    _fDum.position.set(fx, fs.y + 0.4, fz);
+                    _fDum.rotation.set(Math.sin(ph) * 0.14, ph * 0.4, Math.cos(ph) * 0.14);
+                    _fDum.scale.set(fW, Math.max(0.2, fH), fW);
+                    _fDum.updateMatrix();
+                    dr.flameInst.setMatrixAt(flameCursor, _fDum.matrix);
+                    if (ti < 4) _dCol.setHex(0xfff1a8);
+                    else if (ti < 8) _dCol.setHex(0xff8a18);
+                    else _dCol.setHex(0xe03208);
+                    dr.flameInst.setColorAt(flameCursor, _dCol);
+                    flameCursor++;
+                  }
+
+                  // Spawn turbulent billowing smoke puffs
+                  dr.smokeAcc += dtSec * 14 * pulse;
+                  while (dr.smokeAcc >= 1) {
+                    dr.smokeAcc -= 1;
+                    const sp = dr.smokeParts[dr.smokeIdx % dr.smokeParts.length];
+                    dr.smokeIdx++;
+                    const ang = sp.age + dr.smokeIdx * 1.9;
+                    sp.active = true; sp.age = 0; sp.life = 2.6 + (dr.smokeIdx % 5) * 0.42;
+                    sp.x = fs.x + Math.cos(ang) * fs.radius * 0.42;
+                    sp.y = fs.y + 5.5 + (dr.smokeIdx % 3) * 1.4;
+                    sp.z = fs.z + Math.sin(ang) * fs.radius * 0.42;
+                    sp.vx = 10 + Math.cos(ang) * 7;
+                    sp.vy = 20 + (dr.smokeIdx % 4) * 4.5;
+                    sp.vz = 5 + Math.sin(ang) * 7;
+                    sp.sc = 1.6 + (dr.smokeIdx % 3) * 0.6;
+                  }
+                }
+                while (flameCursor < dr.siteFlames.length) {
+                  _fDum.scale.setScalar(0); _fDum.updateMatrix();
+                  dr.flameInst.setMatrixAt(flameCursor++, _fDum.matrix);
+                }
+                for (let si = 0; si < dr.smokeParts.length; si++) {
+                  const sp = dr.smokeParts[si];
+                  if (!sp.active) continue;
+                  sp.age += dtSec;
+                  if (sp.age >= sp.life) {
+                    sp.active = false;
+                    _fDum.scale.setScalar(0); _fDum.updateMatrix();
+                    dr.smokeInst.setMatrixAt(si, _fDum.matrix);
+                    continue;
+                  }
+                  const sn = sp.age / sp.life;
+                  sp.x += (sp.vx + Math.sin(nowS * 2 + si) * 5) * dtSec;
+                  sp.y += sp.vy * (1.0 - sn * 0.28) * dtSec;
+                  sp.z += (sp.vz + Math.cos(nowS * 1.8 + si) * 5) * dtSec;
+                  const puffSc = sp.sc * (1.0 + sn * 3.1) * (sn > 0.72 ? Math.max(0.05, (1.0 - sn) / 0.28) : 1.0);
+                  _fDum.position.set(sp.x, sp.y, sp.z);
+                  _fDum.rotation.set(sp.age * 0.7, sp.age * 1.1, sp.age * 0.5);
+                  _fDum.scale.setScalar(puffSc);
+                  _fDum.updateMatrix();
+                  dr.smokeInst.setMatrixAt(si, _fDum.matrix);
+                  const shade = 0.16 + sn * 0.34;
+                  _dCol.setRGB(shade + 0.06 * (1 - sn), shade, shade + 0.02);
+                  dr.smokeInst.setColorAt(si, _dCol);
+                }
+                dr.emberInst.instanceMatrix.needsUpdate = true;
+                if (dr.emberInst.instanceColor) dr.emberInst.instanceColor.needsUpdate = true;
+                dr.flameInst.instanceMatrix.needsUpdate = true;
+                if (dr.flameInst.instanceColor) dr.flameInst.instanceColor.needsUpdate = true;
+                dr.smokeInst.instanceMatrix.needsUpdate = true;
+                if (dr.smokeInst.instanceColor) dr.smokeInst.instanceColor.needsUpdate = true;
+                if (dr.burnLight) {
+                  if (brightSite) {
+                    dr.burnLight.position.set(brightSite.x, brightSite.y + 12, brightSite.z);
+                    dr.burnLight.intensity = 4.2 + Math.sin(nowS * 21) * 1.4;
+                  } else {
+                    dr.burnLight.intensity = 0;
+                  }
+                }
+              }
+            }
+            st._igniteSite = _igniteSite;
+          };
+          window.__dragonCtrl = {
+            getState: () => {
+              const dr = (window.__outdoorFaunaState && window.__outdoorFaunaState.dragon) || null;
+              return dr ? { mode: dr.mode, landed: dr.mode === 'landed', ridden: dr.mode === 'ridden', x: dr.posX, y: dr.posY, z: dr.posZ } : null;
+            },
+            land: () => {
+              const dr = window.__outdoorFaunaState && window.__outdoorFaunaState.dragon;
+              if (!dr) return false;
+              const pX = (typeof lastPlayerPos !== 'undefined') ? (lastPlayerPos.x - 512) : 0;
+              const pZ = (typeof lastPlayerPos !== 'undefined') ? (lastPlayerPos.y - 384) : 0;
+              dr.landX = pX + 85; dr.landZ = pZ + 55;
+              dr.mode = 'descend'; dr.modeTimer = 0;
+              return true;
+            },
+            mount: () => {
+              const dr = window.__outdoorFaunaState && window.__outdoorFaunaState.dragon;
+              if (!dr) return false;
+              dr.mode = 'ridden';
+              window.__mountedSkyDragon = true;
+              if (typeof lwShowToast === 'function') lwShowToast('🐉 Mounted Ignis-Vael! Move [WASD] • [J/Space] Soar High • breathe fire!');
+              return true;
+            },
+            dismount: () => {
+              const dr = window.__outdoorFaunaState && window.__outdoorFaunaState.dragon;
+              window.__mountedSkyDragon = false;
+              if (dr && dr.mode === 'ridden') { dr.landX = dr.posX; dr.landZ = dr.posZ; dr.mode = 'landed'; dr.modeTimer = 0; }
+              return true;
+            },
+            breatheFire: (dur = 2.6) => {
+              const st = window.__outdoorFaunaState;
+              const dr = st && st.dragon;
+              if (!dr) return false;
+              dr.forcedBreathUntil = performance.now() + dur * 1000;
+              if (st._igniteSite) {
+                st._igniteSite(dr.posX + Math.sin(dr.yaw) * 30, dr.posZ + Math.cos(dr.yaw) * 30, 14, 20);
+                st._igniteSite(dr.posX + Math.sin(dr.yaw) * 52, dr.posZ + Math.cos(dr.yaw) * 52, 16, 22);
+              }
+              return true;
+            },
+            igniteAt: (wx, wz, rad = 14, dur = 20) => {
+              const st = window.__outdoorFaunaState;
+              if (st && st._igniteSite) { st._igniteSite(wx, wz, rad, dur); return true; }
+              return false;
+            },
+          };
+          window.__outdoorWildlifeCtrl = {
+            slayNearest: (wx, wz) => {
+              const st = window.__outdoorFaunaState;
+              if (!st || !Array.isArray(st.cohorts)) return null;
+              let best = null, bestD = 9999, bestKind = 'rabbit';
+              const now = performance.now();
+              st.cohorts.forEach(ch => {
+                if (ch.kind !== 'rabbit' && ch.kind !== 'fox') return;
+                ch.items.forEach(it => {
+                  if (it.deadUntil && now < it.deadUntil) return;
+                  const ix = it.lastWx ?? it.cx, iz = it.lastWz ?? it.cz;
+                  const d = Math.hypot(ix - wx, iz - wz);
+                  if (d < bestD) { bestD = d; best = it; bestKind = ch.kind; }
+                });
+              });
+              if (best && bestD < 2200) {
+                best.killedAt = now;
+                best.deadUntil = now + 45000;
+                return { kind: bestKind, x: best.lastWx ?? best.cx, z: best.lastWz ?? best.cz };
+              }
+              return null;
             }
           };
           window.__stepOutdoorScenery = function (dtSec, nowMs) {
@@ -1191,12 +1995,15 @@
       var theme = data.theme || { base: [40, 50, 60], alt: [30, 40, 50], type: 'dungeon' };
       var tType = theme.type || 'dungeon';
 
+      const cliCfgFloor = (typeof getClientSkillClientCfg === 'function') ? getClientSkillClientCfg() : {};
+      const floorCfg = cliCfgFloor.floor_styles || {};
+      const flKind = (floorCfg.presets && floorCfg.presets[tType]) ? tType : ((typeof classifyWithClientCCELM === 'function' && floorCfg.criteria) ? classifyWithClientCCELM(`${data.room_id || ''} ${tType}`, floorCfg.criteria, 0.35, tType) : tType);
+      const fStyle = (floorCfg.presets && floorCfg.presets[flKind]) || {};
+
       // 1. Procedural 3D Floor Canvas Texture (Rich masonry/planks/organic stains/close-up grain)
-      var floorCacheKey = `floor_v3_${tType}_${theme.base.join('_')}_${theme.alt.join('_')}`;
+      var floorCacheKey = `floor_v4_${tType}_${theme.base.join('_')}_${theme.alt.join('_')}`;
       var floorTex = cachedProcTex[floorCacheKey];
       if (!floorTex) {
-        const cliCfgFloor = (typeof getClientSkillClientCfg === 'function') ? getClientSkillClientCfg() : {};
-        const floorCfg = cliCfgFloor.floor_styles || {};
         const floorBmp = (typeof _workerBitmaps !== 'undefined') ? _workerBitmaps[floorCacheKey] : null;
         if (floorBmp) {
           delete _workerBitmaps[floorCacheKey];
@@ -1211,9 +2018,6 @@
         const aR = clampCh(theme.alt[0]), aG = clampCh(theme.alt[1]), aB = clampCh(theme.alt[2]);
         fctx.fillStyle = `rgb(${bR}, ${bG}, ${bB})`;
         fctx.fillRect(0, 0, 1024, 768);
-
-        const flKind = (floorCfg.presets && floorCfg.presets[tType]) ? tType : ((typeof classifyWithClientCCELM === 'function' && floorCfg.criteria) ? classifyWithClientCCELM(`${data.room_id || ''} ${tType}`, floorCfg.criteria, 0.35, tType) : tType);
-        const fStyle = (floorCfg.presets && floorCfg.presets[flKind]) || {};
 
         // Macro organic dirt & moisture mottling so surfaces never look flat
         for (let m = 0; m < 28; m++) {
@@ -1268,7 +2072,7 @@
                 fctx.strokeStyle = 'rgba(18, 20, 24, 0.55)';
                 fctx.lineWidth = 1.4; fctx.beginPath(); fctx.moveTo(x + 10, y + 10); fctx.lineTo(x + tileW - 14, y + tileH - 12); fctx.stroke();
               } else if (hsh < 0.16 && tType !== 'starforge') {
-                fctx.fillStyle = 'rgba(46, 82, 38, 0.36)';
+                fctx.fillStyle = 'rgba(34, 36, 40, 0.22)';
                 fctx.fillRect(x + 2, y + tileH - 9, tileW * 0.48, 7);
               }
             }
@@ -1391,7 +2195,7 @@
         envMapIntensity: 0.55
       }));
       if (isOutdoorScene) {
-        buildSkyrimOpenWorld(staticGrp, data, W, H, theme, data.time_weather || {}, stoneMat, woodMat, cachedProcTex, applyTextureQuality);
+        buildSkyrimOpenWorld(staticGrp, data, W, H, theme, data.time_weather || {}, stoneMat, woodMat, cachedProcTex, applyTextureQuality, fStyle);
       } else {
         window.getOpenWorldTerrainHeight = () => 0;
       }
@@ -1636,15 +2440,15 @@
               ? [{ x: 0, y: 0, z: 0, s: [ow * 0.44, h * 0.85, oh * 0.44], rot: [0.05, 0.4, -0.08] }, { x: -ow * 0.24, y: 0, z: oh * 0.18, s: [ow * 0.30, h * 0.62, oh * 0.30], rot: [-0.08, 0.9, 0.05] }, { x: ow * 0.22, y: 0, z: -oh * 0.16, s: [ow * 0.26, h * 0.52, oh * 0.26], rot: [0.06, -0.7, 0.08] }]
               : [{ x: 0, y: 0, z: 0, s: [ow * 0.46, h * 0.88, oh * 0.46], rot: [0.06, 0.35, 0.04] }];
             bOffsets.forEach((bo, idx) => {
-              const rockGeo = getSharedGeo(`boulder_rock_v3_${idx}`, () => (window._sculptHelpers && window._sculptHelpers.rock) ? window._sculptHelpers.rock(1.0, 1.0, 1.0, idx + 2) : new THREE.DodecahedronGeometry(1.0, 1));
+              const rockGeo = getSharedGeo(`boulder_rock_v4_${idx}`, () => (window._sculptHelpers && window._sculptHelpers.rock) ? window._sculptHelpers.rock(1.0, 1.0, 1.0, idx + 2) : new THREE.IcosahedronGeometry(1.0, 2));
               const rm = new THREE.Mesh(rockGeo, stoneMat);
               rm.scale.set(bo.s[0], bo.s[1], bo.s[2]); rm.position.set(bo.x, bo.y, bo.z); rm.rotation.set(bo.rot[0], bo.rot[1], bo.rot[2]);
               rm.castShadow = true; rm.receiveShadow = true; bldGrp.add(rm);
             });
             for (let pi = 0; pi < 3; pi++) {
               const pa = (pi * 2.1) + 0.4, pd = Math.max(ow, oh) * 0.42;
-              const pm = new THREE.Mesh(getSharedGeo('clutter_pebble_v2', () => new THREE.DodecahedronGeometry(2.6, 0)), stoneMat);
-              pm.position.set(Math.cos(pa) * pd, 0.4, Math.sin(pa) * pd); pm.scale.set(1.1, 0.7, 0.9); bldGrp.add(pm);
+              const pm = new THREE.Mesh(getSharedGeo('clutter_pebble_v4', () => new THREE.IcosahedronGeometry(2.3, 2)), stoneMat);
+              pm.position.set(Math.cos(pa) * pd, 0.4, Math.sin(pa) * pd); pm.scale.set(1.1, 0.62, 0.9); bldGrp.add(pm);
             }
             staticGrp.add(bldGrp);
           } else if (scKind === 'stump') {
@@ -1709,10 +2513,10 @@
             const cnt = Math.max(4, Math.min(10, Math.floor((ow * oh) / 900)));
             for (let bi = 0; bi < cnt; bi++) {
               const bx = ((Math.sin((cx + bi * 11.7) * 99) * 0.5) * 0.72) * ow, bz = ((Math.cos((cz + bi * 17.3) * 99) * 0.5) * 0.72) * oh, br = 7 + (bi % 4) * 2.5;
-              const bc = new THREE.Mesh(getSharedGeo(`bramble_mound_${bi % 3}`, () => {
-                const dg = new THREE.DodecahedronGeometry(1.0, 1), pa = dg.attributes.position;
+              const bc = new THREE.Mesh(getSharedGeo(`bramble_mound_v2_${bi % 3}`, () => {
+                const dg = new THREE.IcosahedronGeometry(1.0, 2), pa = dg.attributes.position;
                 for (let vi = 0; vi < pa.count; vi++) {
-                  const s = 0.85 + 0.25 * Math.sin(pa.getX(vi) * 4 + bi);
+                  const s = 0.90 + 0.14 * Math.sin(pa.getX(vi) * 3.5 + bi);
                   pa.setXYZ(vi, pa.getX(vi) * s, Math.max(-0.2, pa.getY(vi) * s * 0.65), pa.getZ(vi) * s);
                 }
                 dg.computeVertexNormals(); return dg;

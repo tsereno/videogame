@@ -682,9 +682,7 @@ codex:
         right_hand: staff
         left_hand: tome
         custom_rigs: [character_wizard]
-        pose: {l_arm_pitch: -0.20, r_arm_pitch: -0.32, arm_adduct: 0.38, l_elbow: -0.58, r_elbow: -0.52, leg_adduct: 0.08}
-        right_align: {offset: [-0.010, 0.070, 0.008], dir: [-0.08, 0.94, 0.33], edge: [0.0, 0.0, 1.0]}
-        left_align: {offset: [0.011, 0.071, 0.009], dir: [0.20, 0.35, 0.91], edge: [0.0, 1.0, 0.0]}
+        pose: {l_arm_pitch: -0.36, r_arm_pitch: -0.28, arm_adduct: 0.36, l_elbow: -0.78, r_elbow: -0.48, leg_adduct: 0.08}
       rogue:
         roughness: 0.58
         metalness: 0.32
@@ -697,8 +695,6 @@ codex:
         left_hand: dagger
         custom_rigs: [character_rogue]
         pose: {l_arm_pitch: -0.26, r_arm_pitch: -0.26, arm_adduct: 0.42, l_elbow: -0.54, r_elbow: -0.54, leg_adduct: 0.06}
-        right_align: {offset: [0.016, 0.062, -0.003], dir: [-0.18, 0.15, 0.97], edge: [0.0, 1.0, 0.0]}
-        left_align: {offset: [-0.015, 0.059, -0.003], dir: [0.18, 0.15, 0.97], edge: [0.0, 1.0, 0.0]}
       cleric:
         roughness: 0.22
         metalness: 0.94
@@ -721,7 +717,7 @@ codex:
         headgear: none
         right_hand: none
         left_hand: bow
-        pose: {l_arm_pitch: -0.26, r_arm_pitch: -0.26, arm_adduct: 0.42, l_elbow: -0.54, r_elbow: -0.54, leg_adduct: 0.06}
+        pose: {l_arm_pitch: -0.78, r_arm_pitch: -0.50, arm_adduct: 0.22, l_elbow: -0.14, r_elbow: -0.92, leg_adduct: 0.08}
     scenery_presets:
       criteria:
         omit: "wall bastion meridian perimeter enclosure boundary"

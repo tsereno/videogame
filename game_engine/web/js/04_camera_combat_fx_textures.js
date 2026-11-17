@@ -178,10 +178,36 @@
       return null;
     }
 
+    const activeInteractions = [];
+    let _swingXAxis = null;
+    let _swingQ = null;
+    function _applySwingAngle(limb, pitchRad, extraYaw = 0, extraRoll = 0) {
+      if (!limb) return;
+      if (!_swingXAxis) _swingXAxis = new THREE.Vector3(1, 0, 0);
+      if (!_swingQ) _swingQ = new THREE.Quaternion();
+      const u = limb.userData;
+      if (u && u.baseQuat) {
+        const ax = u.pitchAxis || _swingXAxis;
+        _swingQ.setFromAxisAngle(ax, pitchRad);
+        limb.quaternion.copy(u.baseQuat).multiply(_swingQ);
+        if (extraYaw && u.yawAxis) {
+          _swingQ.setFromAxisAngle(u.yawAxis, extraYaw);
+          limb.quaternion.multiply(_swingQ);
+        }
+      } else {
+        limb.rotation.x = pitchRad;
+        if (extraYaw) limb.rotation.y = extraYaw;
+        if (extraRoll) limb.rotation.z = extraRoll;
+      }
+    }
+
     function triggerWeaponSwing(entityId, isRanged=false, customDuration=280) {
       const grp = findEntity3DGroup(entityId);
-      if (!grp || !grp.userData || !grp.userData.weaponMount) return;
-      // Start or refresh swing animation
+      if (!grp || !grp.userData) return;
+      const ud = grp.userData;
+      if (!ud.weaponMount && !ud.rArm) return;
+      ud.isSwinging = true;
+      const wm = ud.weaponMount || ud.rArm;
       const existing = activeSwings.find(s => s.entityId === entityId);
       if (existing) {
         existing.startTime = performance.now();
@@ -189,17 +215,41 @@
         existing.isRanged = isRanged;
       } else {
         activeSwings.push({
-          entityId: entityId,
-          weaponMount: grp.userData.weaponMount,
-          initialRotX: grp.userData.weaponMount.rotation.x,
-          initialRotY: grp.userData.weaponMount.rotation.y,
-          initialRotZ: grp.userData.weaponMount.rotation.z,
-          isRanged: isRanged,
+          grp,
+          entityId,
+          weaponMount: wm,
+          rArm: ud.rArm, rForeArm: ud.rForeArm,
+          lArm: ud.lArm, lForeArm: ud.lForeArm,
+          chestBone: ud.chestBone,
+          leftHandKind: ud.leftHandKind,
+          initialRotX: wm.rotation.x,
+          initialRotY: wm.rotation.y,
+          initialRotZ: wm.rotation.z,
+          isRanged,
           startTime: performance.now(),
           duration: customDuration
         });
       }
     }
+
+    window.triggerHandInteraction = function triggerHandInteraction(entityId, kind = 'use', durationMs = 540) {
+      const grp = findEntity3DGroup(entityId);
+      if (!grp || !grp.userData || !grp.userData.rArm) return;
+      grp.userData.isInteracting = true;
+      const existing = activeInteractions.find(a => a.entityId === entityId);
+      if (existing) {
+        existing.kind = kind;
+        existing.startTime = performance.now();
+        existing.duration = durationMs;
+      } else {
+        activeInteractions.push({
+          grp, entityId, kind,
+          rArm: grp.userData.rArm, rForeArm: grp.userData.rForeArm,
+          lArm: grp.userData.lArm, lForeArm: grp.userData.lForeArm,
+          startTime: performance.now(), duration: durationMs
+        });
+      }
+    };
 
     function spawnFlyingArrow(fromX, fromY, toX, toY, speed=1350) {
       if (!threeProjectilesGroup) return;
@@ -242,15 +292,44 @@
         const sw = activeSwings[i];
         const elapsed = nowTs - sw.startTime;
         const p = Math.min(1.0, elapsed / sw.duration);
+        const defHands = (sw.grp && sw.grp.userData && sw.grp.userData.defaultHandPoses) || {};
 
-        if (sw.weaponMount) {
+        if (sw.rArm) {
+          if (sw.isRanged && sw.leftHandKind === 'bow') {
+            const draw = Math.sin(p * Math.PI);
+            _applySwingAngle(sw.lArm, -0.45 * draw);
+            _applySwingAngle(sw.lForeArm, 0.15 * draw);
+            _applySwingAngle(sw.rArm, -0.35 * draw);
+            _applySwingAngle(sw.rForeArm, p < 0.65 ? -0.62 * draw : 0.25 * (1 - p));
+            if (typeof window.poseCharacterHands === 'function') {
+              window.poseCharacterHands(sw.grp, defHands.left || 'bow', p > 0.65 ? 'open' : (defHands.right || 'draw'));
+            }
+          } else if (sw.isRanged) {
+            const castArc = Math.sin(p * Math.PI);
+            _applySwingAngle(sw.rArm, -0.95 * castArc);
+            _applySwingAngle(sw.rForeArm, 0.22 * castArc);
+            _applySwingAngle(sw.lArm, -0.25 * castArc);
+            if (typeof window.poseCharacterHands === 'function') {
+              window.poseCharacterHands(sw.grp, (p > 0.25 && p < 0.85) ? 'open' : (defHands.left || 'none'), defHands.right || 'staff');
+            }
+          } else {
+            // 3-phase melee: windup (+0.45 back) -> fast cleave (-1.55 forward) -> settle
+            const pitch = (p < 0.28)
+              ? 0.45 * Math.sin((p / 0.28) * Math.PI * 0.5)
+              : (p < 0.72)
+                ? 0.45 - 2.00 * Math.sin(((p - 0.28) / 0.44) * Math.PI * 0.5)
+                : -1.55 * (1.0 - (p - 0.72) / 0.28);
+            const elbow = (p < 0.28) ? -0.42 * (p / 0.28) : Math.sin(Math.min(1, (p - 0.28) / 0.52) * Math.PI) * 0.36;
+            _applySwingAngle(sw.rArm, pitch);
+            _applySwingAngle(sw.rForeArm, elbow);
+            _applySwingAngle(sw.lArm, -pitch * 0.18);
+            if (sw.chestBone) _applySwingAngle(sw.chestBone, -pitch * 0.08, -pitch * 0.14);
+          }
+        } else if (sw.weaponMount) {
           if (sw.isRanged) {
-            // Recoil & snap animation for bows / crossbows / casting
             const snap = Math.sin(p * Math.PI);
             sw.weaponMount.rotation.x = sw.initialRotX - snap * 0.45;
           } else {
-            // Full heroic arc swing: Windup -> Powerful cleave -> Settle back
-            // Ease in and out with sine wave
             const swingArc = Math.sin(p * Math.PI);
             sw.weaponMount.rotation.x = sw.initialRotX - swingArc * 1.65;
             sw.weaponMount.rotation.y = sw.initialRotY + swingArc * 0.85;
@@ -259,12 +338,51 @@
         }
 
         if (p >= 1.0) {
-          if (sw.weaponMount) {
+          if (sw.rArm) {
+            _applySwingAngle(sw.rArm, 0); _applySwingAngle(sw.rForeArm, 0);
+            _applySwingAngle(sw.lArm, 0); _applySwingAngle(sw.lForeArm, 0);
+            if (sw.chestBone) _applySwingAngle(sw.chestBone, 0, 0);
+            if (typeof window.poseCharacterHands === 'function') window.poseCharacterHands(sw.grp, defHands.left || 'none', defHands.right || 'none');
+          } else if (sw.weaponMount) {
             sw.weaponMount.rotation.x = sw.initialRotX;
             sw.weaponMount.rotation.y = sw.initialRotY;
             sw.weaponMount.rotation.z = sw.initialRotZ;
           }
+          if (sw.grp && sw.grp.userData) sw.grp.userData.isSwinging = false;
           activeSwings.splice(i, 1);
+        }
+      }
+
+      // 1b. Transient Object Manipulation / Interaction Hand Gestures
+      for (let i = activeInteractions.length - 1; i >= 0; i--) {
+        const ia = activeInteractions[i];
+        const p = Math.min(1.0, (nowTs - ia.startTime) / ia.duration);
+        const s = Math.sin(p * Math.PI);
+        const ud = ia.grp && ia.grp.userData;
+        const defHands = (ud && ud.defaultHandPoses) || {};
+        if (ud && !ud.isSwinging) {
+          const twoHand = (ia.kind === 'craft' || ia.kind === 'build' || ia.kind === 'warm');
+          _applySwingAngle(ia.rArm, -0.78 * s);
+          _applySwingAngle(ia.rForeArm, 0.24 * s);
+          if (twoHand) {
+            _applySwingAngle(ia.lArm, -0.72 * s);
+            _applySwingAngle(ia.lForeArm, 0.20 * s);
+          }
+          if (typeof window.poseCharacterHands === 'function') {
+            const rHandPose = (ia.kind === 'take' || ia.kind === 'open')
+              ? (p < 0.48 ? 'open' : 'sword')
+              : 'open';
+            window.poseCharacterHands(ia.grp, twoHand ? 'open' : defHands.left, rHandPose);
+          }
+        }
+        if (p >= 1.0) {
+          if (ud && !ud.isSwinging) {
+            _applySwingAngle(ia.rArm, 0); _applySwingAngle(ia.rForeArm, 0);
+            _applySwingAngle(ia.lArm, 0); _applySwingAngle(ia.lForeArm, 0);
+            if (typeof window.poseCharacterHands === 'function') window.poseCharacterHands(ia.grp, defHands.left || 'none', defHands.right || 'none');
+          }
+          if (ud) ud.isInteracting = false;
+          activeInteractions.splice(i, 1);
         }
       }
 
