@@ -90,7 +90,7 @@ def _nb_fused_step(
     ctx_arr, E, pos_scales, anchor_unit, W_ctx_anc,
     W_rand, b_rand, W_out, b_out, feat_buf, h_buf, logits_buf,
     W_ctx, d_emb, d_anc, h_dim, vocab_size, step_idx,
-    W_anc_out
+    W_anc_out, W_anc_scale
 ):
     # 1. Positional N-Gram Features (W_ctx * d_emb = 128)
     for w in range(W_ctx):
@@ -163,6 +163,8 @@ def _nb_fused_step(
             w_row = row_off + j
             for v in range(vocab_size):
                 logits_buf[v] += hj * W_anc_out[w_row, v]
+        for v in range(vocab_size):
+            logits_buf[v] *= W_anc_scale[sub_idx, v]
     else:
         for v in range(vocab_size):
             logits_buf[v] = b_out[v]
@@ -177,7 +179,7 @@ def _nb_generate_loop(
     p_ids, num_tokens, ctx_w, d_emb, d_anc, vocab_size, h_dim,
     pos_scales, E, W_ctx_anc, W_rand, b_rand, W_out, b_out,
     anchor_unit, stop_set, temp, repetition_penalty, min_tokens,
-    W_anc_out
+    W_anc_out, W_anc_scale
 ):
     out = np.empty(len(p_ids) + num_tokens, dtype=np.int32)
     for i in range(len(p_ids)):
@@ -202,7 +204,7 @@ def _nb_generate_loop(
             ctx, E, pos_scales, anchor_unit, W_ctx_anc,
             W_rand, b_rand, W_out, b_out, fb, hb, cand_l,
             ctx_w, d_emb, d_anc, h_dim, vocab_size, s,
-            W_anc_out
+            W_anc_out, W_anc_scale
         )
 
         # Prevent premature stop tokens before min_tokens
@@ -259,7 +261,7 @@ def _nb_generate_batch(
     p_flat, p_offsets, p_lengths, max_tokens_arr,
     ctx_w, d_emb, d_anc, vocab_size, h_dim, max_gen_cap,
     pos_scales, E, W_ctx_anc, W_rand, b_rand, W_out, b_out,
-    anchors_2d, stop_set, repetition_penalty, min_tokens, W_anc_out
+    anchors_2d, stop_set, repetition_penalty, min_tokens, W_anc_out, W_anc_scale
 ):
     n_probs = len(p_lengths)
     gen_out = np.zeros((n_probs, max_gen_cap), dtype=np.int32)
@@ -290,7 +292,7 @@ def _nb_generate_batch(
                 ctx, E, pos_scales, anchor_unit, W_ctx_anc,
                 W_rand, b_rand, W_out, b_out, fb, hb, cand_l,
                 ctx_w, d_emb, d_anc, h_dim, vocab_size, s,
-                W_anc_out
+                W_anc_out, W_anc_scale
             )
 
             if s < min_tokens:
@@ -364,6 +366,7 @@ class CCELMSurrogate:
         self.W_ctx_anc = None
         self.W_anc = None
         self.W_anc_out = None
+        self.W_anc_scale = None
         self.W_rand_q, self.W_rand_scale, self.b_rand = None, None, None
         self.W_out_q, self.W_out_scale, self.b_out = None, None, None
         self.U_q, self.U_scale = None, None
@@ -373,6 +376,7 @@ class CCELMSurrogate:
         self._W_rand_f32 = None
         self._W_out_f32 = None
         self._W_anc_out_f32 = None
+        self._W_anc_scale = None
         self._U_f32 = None
         self._V_f32 = None
         self._pos_scales = None
@@ -444,12 +448,16 @@ class CCELMSurrogate:
         elif self._U_f32 is not None and self._V_f32 is not None:
             self._W_out_f32 = np.ascontiguousarray(self._U_f32 @ self._V_f32, dtype=np.float32)
         if self.W_anc_out is not None:
-            if isinstance(self.W_anc_out, np.ndarray) and self.W_anc_out.dtype == np.float32 and self.W_anc_out.flags["C_CONTIGUOUS"]:
-                self._W_anc_out_f32 = self.W_anc_out
+            # Stored as int8 (+ per-head/per-column scale) or legacy float32; keep as-is (mmap-friendly).
+            self._W_anc_out_f32 = self.W_anc_out
+            num_sub = self.W_anc_out.shape[0] // (self.hidden_dim + 1)
+            if self.W_anc_scale is not None:
+                self._W_anc_scale = np.ascontiguousarray(self.W_anc_scale, dtype=np.float32)
             else:
-                self._W_anc_out_f32 = np.ascontiguousarray(self.W_anc_out, dtype=np.float32)
+                self._W_anc_scale = np.ones((num_sub, self.W_anc_out.shape[1]), dtype=np.float32)
         else:
             self._W_anc_out_f32 = np.zeros((0, max(self.vocab_size, 1)), dtype=np.float32)
+            self._W_anc_scale = np.ones((0, max(self.vocab_size, 1)), dtype=np.float32)
         if self.W_anc is not None:
             if not (isinstance(self.W_anc, np.ndarray) and self.W_anc.dtype == np.float32 and self.W_anc.flags["C_CONTIGUOUS"]):
                 self.W_anc = np.ascontiguousarray(self.W_anc, dtype=np.float32)
@@ -544,6 +552,7 @@ class CCELMSurrogate:
             float(repetition_penalty),
             int(min_tokens),
             w_anc_out,
+            self._W_anc_scale,
         )
 
     def generate_fast(
@@ -879,6 +888,8 @@ class CCELMSurrogate:
             save_kwargs["V_scale"] = np.array([self.V_scale], dtype=np.float32)
         if self.W_anc_out is not None:
             save_kwargs["W_anc_out"] = self.W_anc_out
+            if self.W_anc_scale is not None:
+                save_kwargs["W_anc_scale"] = self.W_anc_scale
         np.savez(path, **save_kwargs)
 
     @classmethod
